@@ -1,15 +1,11 @@
-export * from "./canonical";
-export * from "./crypto";
-export * from "./receipt-v1";
+export * from "./ens.js";
+export * from "./schema-client.js";
+export * from "./errors.js";
+export * from "./normalize.js";
+export * from "./receipt.js";
 
-// Keep existing exports (if you still need them)
-// If you already export other modules today, re-add them below:
-// export * from "./ens";
-// export * from "./schema-client";
-// export * from "./errors";
-// export * from "./normalize";
-// export * from "./receipt";
-
-export * from "./canonical";
-export * from "./crypto";
-export * from "./receipt-v1";
+// v1 receipt engine additions
+export * from "./canonical.js";
+export * from "./crypto.js";
+export * from "./receipt-v1.js";
+export * from "./encoding.js";
