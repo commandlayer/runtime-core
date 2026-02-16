@@ -12,11 +12,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
@@ -24,14 +20,11 @@
     "prepack": "npm run clean && npm run build"
   },
   "dependencies": {
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "ethers": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
     "typescript": "^5.8.2"
   }
-  "dependencies": {
-  "ethers": "^6.0.0"
-}
-
 }
