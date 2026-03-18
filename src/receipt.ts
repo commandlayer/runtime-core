@@ -1,6 +1,16 @@
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify, type KeyLike } from 'node:crypto';
 import { fromBase64Url, toBase64Url } from './encoding.js';
-import type { AttachProofOptions, Proof, SignOptions, SignedReceipt, UnsignedReceipt, VerifyOptions } from './types.js';
+import type {
+  AttachProofOptions,
+  CommonsReceipt,
+  LayeredReceipt,
+  Proof,
+  ReceiptRuntimeMetadata,
+  SignOptions,
+  SignedLayeredReceipt,
+  SignedReceipt,
+  VerifyOptions
+} from './types.js';
 
 const DEFAULT_CANONICAL = 'json.sorted_keys.v1';
 
@@ -46,7 +56,7 @@ function normalizePublicKey(pubkey: Uint8Array | string): KeyLike {
   return createPublicKey({ key: Buffer.from(pubkey), format: 'der', type: 'spki' });
 }
 
-export function buildUnsignedReceipt(input: UnsignedReceipt): UnsignedReceipt {
+export function buildReceipt(input: CommonsReceipt): CommonsReceipt {
   return {
     verb: input.verb,
     version: input.version,
@@ -54,13 +64,22 @@ export function buildUnsignedReceipt(input: UnsignedReceipt): UnsignedReceipt {
     trace: input.trace,
     payload: input.payload,
     status: input.status,
-    result: input.result,
-    metadata: input.metadata ? { ...input.metadata } : undefined
+    result: input.result
   };
 }
 
-export function canonicalizeReceipt(unsigned: UnsignedReceipt): string {
-  const sorted = sortValue(unsigned);
+/** @deprecated Use buildReceipt to create the canonical commons receipt. */
+export const buildUnsignedReceipt = buildReceipt;
+
+export function createLayeredReceipt(receipt: CommonsReceipt, runtime?: ReceiptRuntimeMetadata): LayeredReceipt {
+  return {
+    receipt: buildReceipt(receipt),
+    ...(runtime ? { runtime: { ...runtime } } : {})
+  };
+}
+
+export function canonicalizeReceipt(receipt: CommonsReceipt): string {
+  const sorted = sortValue(receipt);
   return JSON.stringify(sorted);
 }
 
@@ -68,8 +87,7 @@ export function hashReceiptCanonical(canonical: string): Uint8Array {
   return createHash('sha256').update(canonical, 'utf8').digest();
 }
 
-export function attachProof(unsigned: UnsignedReceipt, options: AttachProofOptions): SignedReceipt {
-  const metadata = { ...(unsigned.metadata ?? {}) } as Record<string, unknown>;
+export function attachProof(receipt: CommonsReceipt, options: AttachProofOptions): SignedLayeredReceipt {
   const proof: Proof = {
     alg: options.alg,
     signer_id: options.signer_id,
@@ -78,19 +96,18 @@ export function attachProof(unsigned: UnsignedReceipt, options: AttachProofOptio
     ...(options.kid ? { kid: options.kid } : {})
   };
 
-  metadata.proof = proof;
   return {
-    ...unsigned,
-    metadata: metadata as SignedReceipt['metadata']
+    receipt: buildReceipt(receipt),
+    signature: { proof }
   };
 }
 
-export function signReceiptEd25519(unsigned: UnsignedReceipt, options: SignOptions): SignedReceipt {
+export function signReceiptEd25519(receipt: CommonsReceipt, options: SignOptions): SignedLayeredReceipt {
   const canonical = options.canonical ?? DEFAULT_CANONICAL;
-  const canonicalReceipt = canonicalizeReceipt(unsigned);
+  const canonicalReceipt = canonicalizeReceipt(receipt);
   const signature = cryptoSign(null, Buffer.from(canonicalReceipt, 'utf8'), normalizePrivateKey(options.privateKey));
 
-  return attachProof(unsigned, {
+  return attachProof(receipt, {
     alg: 'ed25519',
     kid: options.kid,
     signer_id: options.signer_id,
@@ -99,28 +116,31 @@ export function signReceiptEd25519(unsigned: UnsignedReceipt, options: SignOptio
   });
 }
 
-export function verifyReceiptSignature(receipt: SignedReceipt, options: VerifyOptions): boolean {
+export function verifyReceiptSignature(receipt: SignedLayeredReceipt, options: VerifyOptions): boolean {
   const canonical = options.canonical ?? DEFAULT_CANONICAL;
-  const proof = receipt.metadata?.proof;
+  const proof = receipt.signature?.proof;
   if (!proof || proof.alg !== 'ed25519' || proof.canonical !== canonical) {
     return false;
   }
 
-  const { metadata: _meta, ...withoutMetadata } = receipt;
-  const unsigned: UnsignedReceipt = {
-    ...withoutMetadata,
-    metadata: (() => {
-      const metadata = { ...(receipt.metadata ?? {}) };
-      delete (metadata as Record<string, unknown>).proof;
-      return Object.keys(metadata).length ? metadata : undefined;
-    })()
-  };
-
-  const canonicalReceipt = canonicalizeReceipt(unsigned);
+  const canonicalReceipt = canonicalizeReceipt(receipt.receipt);
   return cryptoVerify(
     null,
     Buffer.from(canonicalReceipt, 'utf8'),
     normalizePublicKey(options.pubkey),
     Buffer.from(fromBase64Url(proof.signature))
   );
+}
+
+/**
+ * @deprecated Converts a layered signed receipt into the legacy metadata.proof envelope.
+ */
+export function toLegacySignedReceipt(receipt: SignedLayeredReceipt, runtimeMetadata: Record<string, unknown> = {}): SignedReceipt {
+  return {
+    ...buildReceipt(receipt.receipt),
+    metadata: {
+      ...runtimeMetadata,
+      proof: receipt.signature.proof
+    }
+  };
 }

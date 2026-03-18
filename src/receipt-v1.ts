@@ -1,40 +1,21 @@
-import { canonicalizeSortedKeysV1, CANONICAL_ID_SORTED_KEYS_V1 } from "./canonical";
-import { sha256HexUtf8, signEd25519MessageBase64, verifyEd25519MessageBase64, base64UrlToBase64 } from "./crypto";
+import { canonicalizeSortedKeysV1, CANONICAL_ID_SORTED_KEYS_V1 } from './canonical.js';
+import { sha256HexUtf8, signEd25519MessageBase64, verifyEd25519MessageBase64, base64UrlToBase64 } from './crypto.js';
 
 /**
- * Receipt v1 engine
- * - canonical = json.sorted_keys.v1
- * - hash = sha256 hex of canonical string
- * - signature = Ed25519 over UTF-8 bytes of the hex hash string
- *
- * Proof fields (recommended):
- *   metadata.proof = {
- *     alg: "ed25519-sha256",
- *     canonical: "json.sorted_keys.v1",
- *     signer_id: "<ens>",
- *     kid: "v1",
- *     hash_sha256: "<hex>",
- *     signature_b64: "<base64>"
- *   }
- *
- * Compat:
- * - verify accepts `signature_b64` OR legacy `signature` (base64url) if present
+ * Legacy v1 signing engine.
+ * The canonical Commons receipt remains the signing payload.
+ * Proof and runtime identifiers are layered outside that receipt.
  */
 
-export type ReceiptStatus = "success" | "error" | "delegated";
+export type ReceiptStatus = 'success' | 'error' | 'delegated';
 
 export type ReceiptProof = {
-  alg: "ed25519-sha256" | string;
+  alg: 'ed25519-sha256' | string;
   canonical: string;
   signer_id: string;
   kid?: string;
-
   hash_sha256: string;
-
-  // preferred
   signature_b64?: string;
-
-  // legacy compat (base64url)
   signature?: string;
 };
 
@@ -44,147 +25,149 @@ export type ReceiptBase = {
   status: ReceiptStatus;
   result?: any;
   error?: any;
-  metadata?: {
-    proof?: ReceiptProof;
-    receipt_id?: string;
-    [k: string]: any;
-  };
   [k: string]: any;
 };
 
-/**
- * Build the "unsigned" view of a receipt used for hashing.
- * We remove fields that must not participate in hashing/signing.
- */
-export function unsignedReceiptView(receipt: ReceiptBase): any {
-  const copy: any = JSON.parse(JSON.stringify(receipt));
+export type ReceiptSignatureLayer = {
+  proof: ReceiptProof;
+  receipt_id?: string;
+};
 
-  // remove receipt_id
-  if (copy?.metadata && typeof copy.metadata === "object") {
-    delete copy.metadata.receipt_id;
+export type LayeredReceiptV1 = {
+  receipt: ReceiptBase;
+  runtime?: Record<string, unknown>;
+  signature?: ReceiptSignatureLayer;
+};
 
-    if (copy.metadata.proof && typeof copy.metadata.proof === "object") {
-      delete copy.metadata.proof.hash_sha256;
-      delete copy.metadata.proof.signature_b64;
-      delete copy.metadata.proof.signature;
-    }
-  }
-
-  return copy;
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
 }
 
-/** Compute canonical string + hash for a receipt (unsigned view) */
+/** Build the canonical Commons receipt view used for hashing. */
+export function buildCanonicalReceipt(receipt: ReceiptBase): ReceiptBase {
+  return clone(receipt);
+}
+
+/** Compute canonical string + hash for the canonical Commons receipt. */
 export function computeReceiptCanonicalAndHash(receipt: ReceiptBase): { canonical: string; hash_sha256: string } {
-  const unsigned = unsignedReceiptView(receipt);
-  const canonical = canonicalizeSortedKeysV1(unsigned);
+  const canonicalReceipt = buildCanonicalReceipt(receipt);
+  const canonical = canonicalizeSortedKeysV1(canonicalReceipt);
   const hash_sha256 = sha256HexUtf8(canonical);
   return { canonical, hash_sha256 };
 }
 
 export type SignOptions = {
   signer_id: string;
-  kid?: string; // e.g. "v1"
-  canonical?: string; // default json.sorted_keys.v1
-  privateKeyPem: string; // Ed25519 private key
+  kid?: string;
+  canonical?: string;
+  privateKeyPem: string;
 };
 
-/**
- * Attach/overwrite metadata.proof + metadata.receipt_id and return a new receipt object.
- */
-export function signReceiptEd25519Sha256(receipt: ReceiptBase, opts: SignOptions): ReceiptBase {
+/** Attach a signature layer while preserving receipt/runtime separation. */
+export function signReceiptEd25519Sha256(receipt: ReceiptBase, opts: SignOptions): LayeredReceiptV1 {
   const canonicalId = opts.canonical ?? CANONICAL_ID_SORTED_KEYS_V1;
-
-  // We ONLY support json.sorted_keys.v1 in this engine.
   if (canonicalId !== CANONICAL_ID_SORTED_KEYS_V1) {
     throw new Error(`Unsupported canonical '${canonicalId}'. Expected '${CANONICAL_ID_SORTED_KEYS_V1}'.`);
   }
 
   const { hash_sha256 } = computeReceiptCanonicalAndHash(receipt);
-
-  // Sign the hash *string* bytes (UTF-8), matching current Commons runtime behavior.
   const signature_b64 = signEd25519MessageBase64(hash_sha256, opts.privateKeyPem);
 
-  const next: ReceiptBase = JSON.parse(JSON.stringify(receipt));
-  next.metadata = next.metadata || {};
-
   const proof: ReceiptProof = {
-    alg: "ed25519-sha256",
+    alg: 'ed25519-sha256',
     canonical: CANONICAL_ID_SORTED_KEYS_V1,
     signer_id: opts.signer_id,
     ...(opts.kid ? { kid: opts.kid } : {}),
     hash_sha256,
-    signature_b64,
+    signature_b64
   };
 
-  next.metadata.proof = proof;
-  next.metadata.receipt_id = hash_sha256; // consistent with your current practice
-  return next;
+  return {
+    receipt: buildCanonicalReceipt(receipt),
+    signature: {
+      proof,
+      receipt_id: hash_sha256
+    }
+  };
 }
 
 export type VerifyOptions = {
   publicKeyPemOrDer: string;
-  allowedCanonicals?: string[]; // default: [json.sorted_keys.v1]
-  requireKid?: string; // if provided, require proof.kid
-  requireSignerId?: string; // if provided, require proof.signer_id
+  allowedCanonicals?: string[];
+  requireKid?: string;
+  requireSignerId?: string;
 };
 
-/**
- * Verify receipt signature + hash integrity.
- * Returns ok=false with a concrete reason string when failing.
- */
-export function verifyReceiptEd25519Sha256(receipt: ReceiptBase, opts: VerifyOptions): { ok: boolean; reason?: string } {
-  const proof = receipt?.metadata?.proof;
-  if (!proof) return { ok: false, reason: "missing_proof" };
+/** Verify receipt signature + hash integrity over the canonical Commons receipt only. */
+export function verifyReceiptEd25519Sha256(layeredReceipt: LayeredReceiptV1, opts: VerifyOptions): { ok: boolean; reason?: string } {
+  const proof = layeredReceipt.signature?.proof;
+  if (!proof) return { ok: false, reason: 'missing_proof' };
 
   if (opts.requireSignerId && proof.signer_id !== opts.requireSignerId) {
-    return { ok: false, reason: "signer_id_mismatch" };
+    return { ok: false, reason: 'signer_id_mismatch' };
   }
 
   if (opts.requireKid && proof.kid !== opts.requireKid) {
-    return { ok: false, reason: "kid_mismatch" };
+    return { ok: false, reason: 'kid_mismatch' };
   }
 
   const allowedCanonicals = opts.allowedCanonicals ?? [CANONICAL_ID_SORTED_KEYS_V1];
   if (!allowedCanonicals.includes(proof.canonical)) {
-    return { ok: false, reason: "canonical_not_allowed" };
+    return { ok: false, reason: 'canonical_not_allowed' };
   }
 
-  if (proof.alg !== "ed25519-sha256") {
-    return { ok: false, reason: "unsupported_alg" };
+  if (proof.alg !== 'ed25519-sha256') {
+    return { ok: false, reason: 'unsupported_alg' };
   }
 
-  const { hash_sha256 } = computeReceiptCanonicalAndHash(receipt);
+  const { hash_sha256 } = computeReceiptCanonicalAndHash(layeredReceipt.receipt);
 
-  if (typeof proof.hash_sha256 !== "string" || proof.hash_sha256.length !== 64) {
-    return { ok: false, reason: "missing_or_invalid_hash" };
+  if (typeof proof.hash_sha256 !== 'string' || proof.hash_sha256.length !== 64) {
+    return { ok: false, reason: 'missing_or_invalid_hash' };
   }
 
   if (hash_sha256 !== proof.hash_sha256) {
-    return { ok: false, reason: "hash_mismatch" };
+    return { ok: false, reason: 'hash_mismatch' };
   }
 
-  // Prefer signature_b64. Fall back to legacy base64url `signature`.
   let sigB64: string | null = null;
-  if (typeof proof.signature_b64 === "string" && proof.signature_b64.length > 0) {
+  if (typeof proof.signature_b64 === 'string' && proof.signature_b64.length > 0) {
     sigB64 = proof.signature_b64;
-  } else if (typeof (proof as any).signature === "string" && (proof as any).signature.length > 0) {
-    sigB64 = base64UrlToBase64((proof as any).signature);
+  } else if (typeof proof.signature === 'string' && proof.signature.length > 0) {
+    sigB64 = base64UrlToBase64(proof.signature);
   }
 
-  if (!sigB64) return { ok: false, reason: "missing_signature" };
+  if (!sigB64) return { ok: false, reason: 'missing_signature' };
 
   const ok = verifyEd25519MessageBase64(hash_sha256, sigB64, opts.publicKeyPemOrDer);
-  return ok ? { ok: true } : { ok: false, reason: "bad_signature" };
+  return ok ? { ok: true } : { ok: false, reason: 'bad_signature' };
 }
 
-/**
- * Enforce that a receipt proof.canonical matches what ENS declares for a signer.
- * Use this when you have ENS TXT `cl.sig.canonical`.
- */
-export function enforceCanonicalFromEns(receipt: ReceiptBase, ensCanonical: string): { ok: boolean; reason?: string } {
-  const proof = receipt?.metadata?.proof;
-  if (!proof) return { ok: false, reason: "missing_proof" };
-  if (!ensCanonical) return { ok: false, reason: "missing_ens_canonical" };
-  if (proof.canonical !== ensCanonical) return { ok: false, reason: "canonical_mismatch_ens" };
+export function enforceCanonicalFromEns(layeredReceipt: LayeredReceiptV1, ensCanonical: string): { ok: boolean; reason?: string } {
+  const proof = layeredReceipt.signature?.proof;
+  if (!proof) return { ok: false, reason: 'missing_proof' };
+  if (!ensCanonical) return { ok: false, reason: 'missing_ens_canonical' };
+  if (proof.canonical !== ensCanonical) return { ok: false, reason: 'canonical_mismatch_ens' };
   return { ok: true };
+}
+
+/** @deprecated Compatibility bridge for callers that still expect metadata.proof on the receipt object. */
+export function toLegacyReceiptEnvelope(layeredReceipt: LayeredReceiptV1): ReceiptBase {
+  const legacyReceipt = buildCanonicalReceipt(layeredReceipt.receipt);
+  const metadata: Record<string, unknown> = {
+    ...(layeredReceipt.runtime ?? {})
+  };
+
+  if (layeredReceipt.signature) {
+    metadata.proof = layeredReceipt.signature.proof;
+    if (layeredReceipt.signature.receipt_id) {
+      metadata.receipt_id = layeredReceipt.signature.receipt_id;
+    }
+  }
+
+  if (Object.keys(metadata).length > 0) {
+    (legacyReceipt as ReceiptBase & { metadata?: Record<string, unknown> }).metadata = metadata;
+  }
+
+  return legacyReceipt;
 }

@@ -19,7 +19,7 @@ export interface ValidatorRequest {
 
 export type AsyncValidator = ValidateFunction;
 
-export interface UnsignedReceipt {
+export interface CommonsReceipt {
   verb: string;
   version: string;
   x402: unknown;
@@ -27,7 +27,10 @@ export interface UnsignedReceipt {
   payload: unknown;
   status: string;
   result: unknown;
-  metadata?: Record<string, unknown>;
+}
+
+export interface ReceiptRuntimeMetadata {
+  [key: string]: unknown;
 }
 
 export interface Proof {
@@ -38,7 +41,28 @@ export interface Proof {
   signature: string;
 }
 
-export interface SignedReceipt extends UnsignedReceipt {
+export interface SignedReceiptLayer {
+  proof: Proof;
+}
+
+export interface LayeredReceipt {
+  receipt: CommonsReceipt;
+  runtime?: ReceiptRuntimeMetadata;
+}
+
+export interface SignedLayeredReceipt extends LayeredReceipt {
+  signature: SignedReceiptLayer;
+}
+
+/**
+ * @deprecated Use CommonsReceipt for the canonical signed payload.
+ */
+export type UnsignedReceipt = CommonsReceipt;
+
+/**
+ * @deprecated Use SignedLayeredReceipt to keep signature material outside the receipt.
+ */
+export interface SignedReceipt extends CommonsReceipt {
   metadata: Record<string, unknown> & {
     proof: Proof;
   };
