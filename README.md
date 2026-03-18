@@ -6,7 +6,7 @@ Shared protocol engine for CommandLayer runtimes. This package centralizes the r
 
 - Request normalization (`payload` plus legacy `input` support)
 - JSON-schema validation client (AJV + remote schema loading)
-- Receipt build/canonicalize/hash/sign/verify helpers
+- Commons receipt build/canonicalize/hash/sign/verify helpers with explicit runtime layering
 - ENS signer discovery from TXT records
 - Compact AJV error formatting
 
@@ -58,14 +58,15 @@ if (!isValid) {
 
 ```ts
 import {
-  buildUnsignedReceipt,
+  buildReceipt,
   canonicalizeReceipt,
+  createLayeredReceipt,
   hashReceiptCanonical,
   signReceiptEd25519,
   verifyReceiptSignature
 } from '@commandlayer/runtime-core';
 
-const unsigned = buildUnsignedReceipt({
+const receipt = buildReceipt({
   verb: 'chat.completions',
   version: 'v1',
   x402: { policy: 'standard' },
@@ -75,14 +76,18 @@ const unsigned = buildUnsignedReceipt({
   result: { output: 'world' }
 });
 
-const canonical = canonicalizeReceipt(unsigned);
+const canonical = canonicalizeReceipt(receipt);
 const hash = hashReceiptCanonical(canonical); // sha256 bytes
 
-const signed = signReceiptEd25519(unsigned, {
+const signed = signReceiptEd25519(receipt, {
   privateKey: process.env.SIGNING_PRIVATE_KEY_PEM!,
   signer_id: 'signer.commandlayer.eth',
   kid: '2026-01',
   canonical: 'json.sorted_keys.v1'
+});
+
+const layered = createLayeredReceipt(receipt, {
+  execution: { duration_ms: 42 }
 });
 
 const ok = verifyReceiptSignature(signed, {
@@ -90,6 +95,8 @@ const ok = verifyReceiptSignature(signed, {
   canonical: 'json.sorted_keys.v1'
 });
 ```
+
+`receipt` is the canonical Commons payload. Runtime metadata and signatures are layered alongside it rather than merged into the signed structure.
 
 ### Resolve signer from ENS
 
