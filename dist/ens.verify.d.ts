@@ -3,8 +3,5 @@ export declare function verifyRuntimeReceiptV1WithEns(receipt: any, opts: {
     signerEnsName: string;
     txtKey?: string;
     allowedCanonicals?: string[];
-}): Promise<{
-    ok: boolean;
-    reason?: string;
-}>;
+}): Promise<import("./receipt-v1.js").VerifyReceiptResult>;
 //# sourceMappingURL=ens.verify.d.ts.map

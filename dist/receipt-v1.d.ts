@@ -58,11 +58,17 @@ export type VerifyOptions = {
     requireKid?: string;
     requireSignerId?: string;
 };
-/** Verify receipt signature + hash integrity over the canonical Commons receipt only. */
-export declare function verifyReceiptEd25519Sha256(layeredReceipt: LayeredReceiptV1, opts: VerifyOptions): {
+export type VerifyReceiptChecks = {
+    hash_matches: boolean;
+    signature_matches: boolean;
+};
+export type VerifyReceiptResult = {
     ok: boolean;
     reason?: string;
+    checks: VerifyReceiptChecks;
 };
+/** Verify receipt signature + hash integrity over the canonical Commons receipt only. */
+export declare function verifyReceiptEd25519Sha256(receipt: LayeredReceiptV1 | ReceiptBase, opts: VerifyOptions): VerifyReceiptResult;
 export declare function enforceCanonicalFromEns(layeredReceipt: LayeredReceiptV1, ensCanonical: string): {
     ok: boolean;
     reason?: string;
