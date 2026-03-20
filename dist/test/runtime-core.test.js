@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { canonicalizeReceipt, createLayeredReceipt, extractEd25519Raw32FromSpkiDer, hashReceiptCanonical, normalizeRequest, parsePemToDer, signReceiptEd25519, toBase64Url, toLegacySignedReceipt, verifyReceiptSignature } from '../index.js';
+import { canonicalizeReceipt, createLayeredReceipt, extractEd25519Raw32FromSpkiDer, hashReceiptCanonical, normalizeRequest, parsePemToDer, signReceiptEd25519Sha256, signReceiptEd25519, toBase64Url, toLegacyReceiptEnvelope, toLegacySignedReceipt, verifyReceiptEd25519Sha256, verifyReceiptSignature } from '../index.js';
 test('normalizeRequest maps legacy input to payload', () => {
     const normalized = normalizeRequest({ x402: { a: 1 }, trace: { t: '1' }, input: { hello: 'world' } });
     assert.deepEqual(normalized, {
@@ -76,5 +76,30 @@ test('sign/verify pipeline keeps proof outside the canonical receipt', () => {
     const legacyReceipt = toLegacySignedReceipt(receipt, { execution: { duration_ms: 12 } });
     assert.equal(legacyReceipt.metadata.proof.signer_id, 'ens:test.eth');
     assert.deepEqual(legacyReceipt.metadata.execution, { duration_ms: 12 });
+});
+test('runtime-core: tampered receipt fails verification', () => {
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const signedReceipt = signReceiptEd25519Sha256({
+        status: 'success',
+        x402: { verb: 'test', version: '1.1.0' },
+        trace: { trace_id: 'trace_123' },
+        result: { ok: true }
+    }, {
+        signer_id: 'runtime.commandlayer.eth',
+        kid: 'testkid',
+        canonical: 'json.sorted_keys.v1',
+        privateKeyPem: privatePem
+    });
+    const legacyReceipt = toLegacyReceiptEnvelope(signedReceipt);
+    legacyReceipt.result = { ok: false };
+    const result = verifyReceiptEd25519Sha256(legacyReceipt, {
+        publicKeyPemOrDer: publicPem,
+        allowedCanonicals: ['json.sorted_keys.v1']
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.checks.hash_matches, false);
+    assert.equal(result.reason, 'hash_mismatch');
 });
 //# sourceMappingURL=runtime-core.test.js.map

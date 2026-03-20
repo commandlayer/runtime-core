@@ -98,36 +98,82 @@ export type VerifyOptions = {
   requireSignerId?: string;
 };
 
+export type VerifyReceiptChecks = {
+  hash_matches: boolean;
+  signature_matches: boolean;
+};
+
+export type VerifyReceiptResult = {
+  ok: boolean;
+  reason?: string;
+  checks: VerifyReceiptChecks;
+};
+
+function toLayeredReceiptV1(receipt: LayeredReceiptV1 | ReceiptBase): LayeredReceiptV1 {
+  const layeredReceipt = receipt as LayeredReceiptV1;
+  if (layeredReceipt.receipt) {
+    return layeredReceipt;
+  }
+
+  const legacyReceipt = buildCanonicalReceipt(receipt as ReceiptBase) as ReceiptBase & {
+    metadata?: Record<string, unknown> & {
+      proof?: ReceiptProof;
+      receipt_id?: string;
+    };
+  };
+
+  const metadata = legacyReceipt.metadata;
+  if (metadata) {
+    delete legacyReceipt.metadata;
+  }
+
+  return {
+    receipt: legacyReceipt,
+    ...(metadata?.proof
+      ? {
+          signature: {
+            proof: metadata.proof,
+            ...(typeof metadata.receipt_id === 'string' ? { receipt_id: metadata.receipt_id } : {})
+          }
+        }
+      : {})
+  };
+}
+
 /** Verify receipt signature + hash integrity over the canonical Commons receipt only. */
-export function verifyReceiptEd25519Sha256(layeredReceipt: LayeredReceiptV1, opts: VerifyOptions): { ok: boolean; reason?: string } {
+export function verifyReceiptEd25519Sha256(
+  receipt: LayeredReceiptV1 | ReceiptBase,
+  opts: VerifyOptions
+): VerifyReceiptResult {
+  const layeredReceipt = toLayeredReceiptV1(receipt);
   const proof = layeredReceipt.signature?.proof;
-  if (!proof) return { ok: false, reason: 'missing_proof' };
+  if (!proof) return { ok: false, reason: 'missing_proof', checks: { hash_matches: false, signature_matches: false } };
 
   if (opts.requireSignerId && proof.signer_id !== opts.requireSignerId) {
-    return { ok: false, reason: 'signer_id_mismatch' };
+    return { ok: false, reason: 'signer_id_mismatch', checks: { hash_matches: false, signature_matches: false } };
   }
 
   if (opts.requireKid && proof.kid !== opts.requireKid) {
-    return { ok: false, reason: 'kid_mismatch' };
+    return { ok: false, reason: 'kid_mismatch', checks: { hash_matches: false, signature_matches: false } };
   }
 
   const allowedCanonicals = opts.allowedCanonicals ?? [CANONICAL_ID_SORTED_KEYS_V1];
   if (!allowedCanonicals.includes(proof.canonical)) {
-    return { ok: false, reason: 'canonical_not_allowed' };
+    return { ok: false, reason: 'canonical_not_allowed', checks: { hash_matches: false, signature_matches: false } };
   }
 
   if (proof.alg !== 'ed25519-sha256') {
-    return { ok: false, reason: 'unsupported_alg' };
+    return { ok: false, reason: 'unsupported_alg', checks: { hash_matches: false, signature_matches: false } };
   }
 
   const { hash_sha256 } = computeReceiptCanonicalAndHash(layeredReceipt.receipt);
 
   if (typeof proof.hash_sha256 !== 'string' || proof.hash_sha256.length !== 64) {
-    return { ok: false, reason: 'missing_or_invalid_hash' };
+    return { ok: false, reason: 'missing_or_invalid_hash', checks: { hash_matches: false, signature_matches: false } };
   }
 
   if (hash_sha256 !== proof.hash_sha256) {
-    return { ok: false, reason: 'hash_mismatch' };
+    return { ok: false, reason: 'hash_mismatch', checks: { hash_matches: false, signature_matches: false } };
   }
 
   let sigB64: string | null = null;
@@ -137,10 +183,12 @@ export function verifyReceiptEd25519Sha256(layeredReceipt: LayeredReceiptV1, opt
     sigB64 = base64UrlToBase64(proof.signature);
   }
 
-  if (!sigB64) return { ok: false, reason: 'missing_signature' };
+  if (!sigB64) return { ok: false, reason: 'missing_signature', checks: { hash_matches: true, signature_matches: false } };
 
   const ok = verifyEd25519MessageBase64(hash_sha256, sigB64, opts.publicKeyPemOrDer);
-  return ok ? { ok: true } : { ok: false, reason: 'bad_signature' };
+  return ok
+    ? { ok: true, checks: { hash_matches: true, signature_matches: true } }
+    : { ok: false, reason: 'bad_signature', checks: { hash_matches: true, signature_matches: false } };
 }
 
 export function enforceCanonicalFromEns(layeredReceipt: LayeredReceiptV1, ensCanonical: string): { ok: boolean; reason?: string } {
