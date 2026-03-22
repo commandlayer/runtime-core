@@ -1,57 +1,70 @@
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { fromBase64Url, toBase64Url } from './encoding.js';
-const DEFAULT_CANONICAL = 'json.sorted_keys.v1';
+import { COMMAND_LAYER_CURRENT_LINE, COMMONS_CONTRACT, COMMERCIAL_CONTRACT, DEFAULT_CANONICAL_ID } from './types.js';
 function sortValue(value) {
-    if (Array.isArray(value)) {
+    if (Array.isArray(value))
         return value.map(sortValue);
-    }
     if (value && typeof value === 'object') {
-        const entries = Object.entries(value)
+        return Object.fromEntries(Object.entries(value)
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, val]) => [key, sortValue(val)]);
-        return Object.fromEntries(entries);
+            .map(([key, val]) => [key, sortValue(val)]));
     }
     return value;
 }
 function toEd25519PublicSpki(raw32) {
-    if (raw32.length !== 32) {
+    if (raw32.length !== 32)
         throw new Error('Ed25519 public key must be 32 bytes');
-    }
     const prefix = Buffer.from('302a300506032b6570032100', 'hex');
     return Buffer.concat([prefix, Buffer.from(raw32)]);
 }
 function normalizePrivateKey(privateKey) {
-    if (typeof privateKey === 'string') {
-        return createPrivateKey(privateKey);
-    }
-    return createPrivateKey({ key: Buffer.from(privateKey), format: 'der', type: 'pkcs8' });
+    return typeof privateKey === 'string'
+        ? createPrivateKey(privateKey)
+        : createPrivateKey({ key: Buffer.from(privateKey), format: 'der', type: 'pkcs8' });
 }
 function normalizePublicKey(pubkey) {
     if (typeof pubkey === 'string') {
-        if (pubkey.includes('BEGIN PUBLIC KEY')) {
+        if (pubkey.includes('BEGIN PUBLIC KEY'))
             return createPublicKey(pubkey);
-        }
-        const decoded = fromBase64Url(pubkey);
-        return createPublicKey({ key: toEd25519PublicSpki(decoded), format: 'der', type: 'spki' });
+        return createPublicKey({ key: toEd25519PublicSpki(fromBase64Url(pubkey)), format: 'der', type: 'spki' });
     }
     if (pubkey.length === 32) {
         return createPublicKey({ key: toEd25519PublicSpki(pubkey), format: 'der', type: 'spki' });
     }
     return createPublicKey({ key: Buffer.from(pubkey), format: 'der', type: 'spki' });
 }
-export function buildReceipt(input) {
+export function buildCommonsReceipt(input) {
     return {
+        line: COMMAND_LAYER_CURRENT_LINE,
+        contract: COMMONS_CONTRACT,
         verb: input.verb,
         version: input.version,
-        x402: input.x402,
+        payload: input.payload,
+        status: input.status,
+        ...(input.trace ? { trace: input.trace } : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'result') ? { result: input.result } : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'error') ? { error: input.error } : {})
+    };
+}
+export function buildCommercialReceipt(input) {
+    const commons = buildCommonsReceipt({
+        verb: input.verb,
+        version: input.version,
         trace: input.trace,
         payload: input.payload,
         status: input.status,
-        result: input.result
+        ...(Object.prototype.hasOwnProperty.call(input, 'result') ? { result: input.result } : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'error') ? { error: input.error } : {})
+    });
+    return {
+        ...commons,
+        contract: COMMERCIAL_CONTRACT,
+        commercial: { ...input.commercial }
     };
 }
-/** @deprecated Use buildReceipt to create the canonical commons receipt. */
-export const buildUnsignedReceipt = buildReceipt;
+export function buildReceipt(input) {
+    return input.contract === COMMERCIAL_CONTRACT ? buildCommercialReceipt(input) : buildCommonsReceipt(input);
+}
 export function createLayeredReceipt(receipt, runtime) {
     return {
         receipt: buildReceipt(receipt),
@@ -59,8 +72,7 @@ export function createLayeredReceipt(receipt, runtime) {
     };
 }
 export function canonicalizeReceipt(receipt) {
-    const sorted = sortValue(receipt);
-    return JSON.stringify(sorted);
+    return JSON.stringify(sortValue(buildReceipt(receipt)));
 }
 export function hashReceiptCanonical(canonical) {
     return createHash('sha256').update(canonical, 'utf8').digest();
@@ -79,9 +91,8 @@ export function attachProof(receipt, options) {
     };
 }
 export function signReceiptEd25519(receipt, options) {
-    const canonical = options.canonical ?? DEFAULT_CANONICAL;
-    const canonicalReceipt = canonicalizeReceipt(receipt);
-    const signature = cryptoSign(null, Buffer.from(canonicalReceipt, 'utf8'), normalizePrivateKey(options.privateKey));
+    const canonical = options.canonical ?? DEFAULT_CANONICAL_ID;
+    const signature = cryptoSign(null, Buffer.from(canonicalizeReceipt(receipt), 'utf8'), normalizePrivateKey(options.privateKey));
     return attachProof(receipt, {
         alg: 'ed25519',
         kid: options.kid,
@@ -91,20 +102,23 @@ export function signReceiptEd25519(receipt, options) {
     });
 }
 export function verifyReceiptSignature(receipt, options) {
-    const canonical = options.canonical ?? DEFAULT_CANONICAL;
+    const canonical = options.canonical ?? DEFAULT_CANONICAL_ID;
     const proof = receipt.signature?.proof;
-    if (!proof || proof.alg !== 'ed25519' || proof.canonical !== canonical) {
+    if (!proof || proof.alg !== 'ed25519' || proof.canonical !== canonical)
         return false;
-    }
-    const canonicalReceipt = canonicalizeReceipt(receipt.receipt);
-    return cryptoVerify(null, Buffer.from(canonicalReceipt, 'utf8'), normalizePublicKey(options.pubkey), Buffer.from(fromBase64Url(proof.signature)));
+    return cryptoVerify(null, Buffer.from(canonicalizeReceipt(receipt.receipt), 'utf8'), normalizePublicKey(options.pubkey), Buffer.from(fromBase64Url(proof.signature)));
 }
-/**
- * @deprecated Converts a layered signed receipt into the legacy metadata.proof envelope.
- */
+/** @deprecated Legacy 1.0.0 metadata.proof envelope. */
 export function toLegacySignedReceipt(receipt, runtimeMetadata = {}) {
+    const built = buildReceipt(receipt.receipt);
     return {
-        ...buildReceipt(receipt.receipt),
+        ...(built.contract === COMMERCIAL_CONTRACT ? { x402: built.commercial } : {}),
+        verb: built.verb,
+        version: String(built.version),
+        ...(built.trace ? { trace: built.trace } : {}),
+        payload: built.payload,
+        status: built.status,
+        ...(Object.prototype.hasOwnProperty.call(built, 'result') ? { result: built.result } : {}),
         metadata: {
             ...runtimeMetadata,
             proof: receipt.signature.proof

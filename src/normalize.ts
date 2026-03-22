@@ -1,11 +1,49 @@
-import type { NormalizedRequest } from './types.js';
+import type {
+  CommercialRequest,
+  CommercialTerms,
+  CommonsRequest,
+  TraceContext
+} from './types.js';
 
-export function normalizeRequest(body: Record<string, unknown> | null | undefined): NormalizedRequest {
+function normalizeTrace(trace: unknown): TraceContext | undefined {
+  if (trace && typeof trace === 'object' && !Array.isArray(trace)) {
+    return { ...(trace as TraceContext) };
+  }
+  return undefined;
+}
+
+function normalizePayload(body: Record<string, unknown>): unknown {
+  if (Object.prototype.hasOwnProperty.call(body, 'payload')) {
+    return body.payload;
+  }
+  return body.input;
+}
+
+export function normalizeCommonsRequest(body: Record<string, unknown> | null | undefined): CommonsRequest {
   const safeBody = body ?? {};
-  const payload = safeBody.payload ?? safeBody.input;
   return {
-    x402: safeBody.x402,
-    trace: safeBody.trace,
-    payload
+    payload: normalizePayload(safeBody),
+    ...(normalizeTrace(safeBody.trace) ? { trace: normalizeTrace(safeBody.trace) } : {})
   };
+}
+
+export function normalizeCommercialRequest(body: Record<string, unknown> | null | undefined): CommercialRequest {
+  const safeBody = body ?? {};
+  const commercial = (safeBody.commercial ?? safeBody.payment) as CommercialTerms | undefined;
+  if (!commercial || typeof commercial !== 'object' || Array.isArray(commercial)) {
+    throw new Error('Commercial requests require a commercial metadata object');
+  }
+
+  return {
+    ...normalizeCommonsRequest(safeBody),
+    commercial: { ...commercial }
+  };
+}
+
+/**
+ * Current-line default normalization targets Commons and intentionally ignores legacy x402 metadata.
+ * @deprecated Prefer normalizeCommonsRequest or normalizeCommercialRequest.
+ */
+export function normalizeRequest(body: Record<string, unknown> | null | undefined): CommonsRequest {
+  return normalizeCommonsRequest(body);
 }
