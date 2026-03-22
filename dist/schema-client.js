@@ -1,16 +1,20 @@
+import { COMMAND_LAYER_CURRENT_LINE, DEFAULT_SCHEMA_VERSION } from './types.js';
 function swapWww(hostname) {
-    if (hostname.startsWith('www.')) {
-        return hostname.slice(4);
-    }
-    return `www.${hostname}`;
+    return hostname.startsWith('www.') ? hostname.slice(4) : `www.${hostname}`;
 }
-function buildUrl(base, kind, params) {
-    const path = `/schemas/${params.tier}/${params.verb}/${params.version}/${kind}.schema.json`;
-    return new URL(path, base).toString();
+export function buildSchemaPath(params) {
+    const schemaVersion = params.version ?? DEFAULT_SCHEMA_VERSION;
+    const lineVersion = params.lineVersion ?? COMMAND_LAYER_CURRENT_LINE;
+    return `/schemas/${lineVersion}/${params.contract}/${params.verb}/${schemaVersion}/${params.kind}.schema.json`;
+}
+/** @deprecated Legacy pre-1.1.0 schema path format. */
+export function buildLegacySchemaPath(kind, params) {
+    return `/schemas/${params.tier}/${params.verb}/${params.version}/${kind}.schema.json`;
 }
 export function createSchemaClient(options) {
     const timeoutMs = options.timeoutMs ?? 5000;
     const baseUrl = new URL(options.schemaHost);
+    const defaultLineVersion = options.lineVersion ?? COMMAND_LAYER_CURRENT_LINE;
     const fetchCache = new Map();
     const validatorCache = new Map();
     let ajvPromise;
@@ -22,10 +26,7 @@ export function createSchemaClient(options) {
                 return new Ajv({
                     strict: true,
                     allErrors: true,
-                    loadSchema: async (uri) => {
-                        const schema = await fetchJson(uri);
-                        return schema;
-                    }
+                    loadSchema: async (uri) => (await fetchJson(uri))
                 });
             })();
         }
@@ -46,16 +47,14 @@ export function createSchemaClient(options) {
         if (cached)
             return cached;
         const request = (async () => {
-            const tryUrls = [url];
             const parsed = new URL(url);
-            tryUrls.push(new URL(`${parsed.protocol}//${swapWww(parsed.hostname)}${parsed.pathname}${parsed.search}`).toString());
+            const tryUrls = [url, new URL(`${parsed.protocol}//${swapWww(parsed.hostname)}${parsed.pathname}${parsed.search}`).toString()];
             let lastError;
             for (const candidate of tryUrls) {
                 try {
                     const response = await fetchWithTimeout(candidate);
-                    if (!response.ok) {
+                    if (!response.ok)
                         throw new Error(`Schema fetch failed (${response.status}) for ${candidate}`);
-                    }
                     const contentType = response.headers.get('content-type') ?? '';
                     if (!contentType.toLowerCase().includes('application/json')) {
                         throw new Error(`Unexpected content-type for schema: ${contentType || 'unknown'}`);
@@ -71,14 +70,26 @@ export function createSchemaClient(options) {
         fetchCache.set(url, request);
         return request;
     }
+    function buildSchemaUrl(kind, params) {
+        const path = buildSchemaPath({
+            contract: params.contract,
+            verb: params.verb,
+            version: params.version,
+            lineVersion: params.lineVersion ?? defaultLineVersion,
+            kind
+        });
+        return new URL(path, baseUrl).toString();
+    }
     async function getValidator(kind, params) {
-        const key = `${kind}:${params.tier}:${params.verb}:${params.version}`;
+        const contract = params.contract;
+        const version = params.version ?? DEFAULT_SCHEMA_VERSION;
+        const lineVersion = params.lineVersion ?? defaultLineVersion;
+        const key = `${kind}:${lineVersion}:${contract}:${params.verb}:${version}`;
         const existing = validatorCache.get(key);
         if (existing)
             return existing;
         const promise = (async () => {
-            const schemaUrl = buildUrl(baseUrl, kind, params);
-            const schema = await fetchJson(schemaUrl);
+            const schema = await fetchJson(buildSchemaUrl(kind, params));
             const ajv = await getAjv();
             return ajv.compileAsync(schema);
         })();
@@ -87,6 +98,7 @@ export function createSchemaClient(options) {
     }
     return {
         fetchJson,
+        buildSchemaUrl,
         getRequestValidator: (params) => getValidator('request', params),
         getReceiptValidator: (params) => getValidator('receipt', params)
     };

@@ -1,10 +1,19 @@
 import type { ValidateFunction } from 'ajv';
-import type { AsyncValidator, SchemaClientOptions, ValidatorRequest } from './types.js';
+import type {
+  AsyncValidator,
+  CommandLayerLineVersion,
+  ContractTier,
+  SchemaClientOptions,
+  SchemaVersion,
+  ValidatorRequest
+} from './types.js';
+import { COMMAND_LAYER_CURRENT_LINE, DEFAULT_SCHEMA_VERSION } from './types.js';
 
 interface SchemaClient {
   fetchJson: (url: string) => Promise<unknown>;
   getRequestValidator: (params: ValidatorRequest) => Promise<AsyncValidator>;
   getReceiptValidator: (params: ValidatorRequest) => Promise<AsyncValidator>;
+  buildSchemaUrl: (kind: 'request' | 'receipt', params: ValidatorRequest) => string;
 }
 
 interface AjvLike {
@@ -12,20 +21,30 @@ interface AjvLike {
 }
 
 function swapWww(hostname: string): string {
-  if (hostname.startsWith('www.')) {
-    return hostname.slice(4);
-  }
-  return `www.${hostname}`;
+  return hostname.startsWith('www.') ? hostname.slice(4) : `www.${hostname}`;
 }
 
-function buildUrl(base: URL, kind: 'request' | 'receipt', params: ValidatorRequest): string {
-  const path = `/schemas/${params.tier}/${params.verb}/${params.version}/${kind}.schema.json`;
-  return new URL(path, base).toString();
+export function buildSchemaPath(params: {
+  contract: ContractTier;
+  verb: string;
+  version?: SchemaVersion;
+  lineVersion?: CommandLayerLineVersion;
+  kind: 'request' | 'receipt';
+}): string {
+  const schemaVersion = params.version ?? DEFAULT_SCHEMA_VERSION;
+  const lineVersion = params.lineVersion ?? COMMAND_LAYER_CURRENT_LINE;
+  return `/schemas/${lineVersion}/${params.contract}/${params.verb}/${schemaVersion}/${params.kind}.schema.json`;
+}
+
+/** @deprecated Legacy pre-1.1.0 schema path format. */
+export function buildLegacySchemaPath(kind: 'request' | 'receipt', params: { tier: string; verb: string; version: string }): string {
+  return `/schemas/${params.tier}/${params.verb}/${params.version}/${kind}.schema.json`;
 }
 
 export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
   const timeoutMs = options.timeoutMs ?? 5000;
   const baseUrl = new URL(options.schemaHost);
+  const defaultLineVersion = options.lineVersion ?? COMMAND_LAYER_CURRENT_LINE;
   const fetchCache = new Map<string, Promise<unknown>>();
   const validatorCache = new Map<string, Promise<AsyncValidator>>();
   let ajvPromise: Promise<AjvLike> | undefined;
@@ -38,10 +57,7 @@ export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
         return new Ajv({
           strict: true,
           allErrors: true,
-          loadSchema: async (uri: string) => {
-            const schema = await fetchJson(uri);
-            return schema as object;
-          }
+          loadSchema: async (uri: string) => (await fetchJson(uri)) as object
         }) as AjvLike;
       })();
     }
@@ -63,17 +79,14 @@ export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
     if (cached) return cached;
 
     const request = (async () => {
-      const tryUrls = [url];
       const parsed = new URL(url);
-      tryUrls.push(new URL(`${parsed.protocol}//${swapWww(parsed.hostname)}${parsed.pathname}${parsed.search}`).toString());
-
+      const tryUrls = [url, new URL(`${parsed.protocol}//${swapWww(parsed.hostname)}${parsed.pathname}${parsed.search}`).toString()];
       let lastError: unknown;
+
       for (const candidate of tryUrls) {
         try {
           const response = await fetchWithTimeout(candidate);
-          if (!response.ok) {
-            throw new Error(`Schema fetch failed (${response.status}) for ${candidate}`);
-          }
+          if (!response.ok) throw new Error(`Schema fetch failed (${response.status}) for ${candidate}`);
 
           const contentType = response.headers.get('content-type') ?? '';
           if (!contentType.toLowerCase().includes('application/json')) {
@@ -93,14 +106,27 @@ export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
     return request;
   }
 
+  function buildSchemaUrl(kind: 'request' | 'receipt', params: ValidatorRequest): string {
+    const path = buildSchemaPath({
+      contract: params.contract,
+      verb: params.verb,
+      version: params.version,
+      lineVersion: params.lineVersion ?? defaultLineVersion,
+      kind
+    });
+    return new URL(path, baseUrl).toString();
+  }
+
   async function getValidator(kind: 'request' | 'receipt', params: ValidatorRequest): Promise<AsyncValidator> {
-    const key = `${kind}:${params.tier}:${params.verb}:${params.version}`;
+    const contract = params.contract;
+    const version = params.version ?? DEFAULT_SCHEMA_VERSION;
+    const lineVersion = params.lineVersion ?? defaultLineVersion;
+    const key = `${kind}:${lineVersion}:${contract}:${params.verb}:${version}`;
     const existing = validatorCache.get(key);
     if (existing) return existing;
 
     const promise = (async () => {
-      const schemaUrl = buildUrl(baseUrl, kind, params);
-      const schema = await fetchJson(schemaUrl);
+      const schema = await fetchJson(buildSchemaUrl(kind, params));
       const ajv = await getAjv();
       return ajv.compileAsync(schema as object);
     })();
@@ -111,6 +137,7 @@ export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
 
   return {
     fetchJson,
+    buildSchemaUrl,
     getRequestValidator: (params) => getValidator('request', params),
     getReceiptValidator: (params) => getValidator('receipt', params)
   };

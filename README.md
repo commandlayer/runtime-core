@@ -1,13 +1,21 @@
 # @commandlayer/runtime-core
 
-Shared protocol engine for CommandLayer runtimes. This package centralizes the request/receipt contract used by both open and commercial runtime tiers so receipts remain verifiable by the same rules.
+Core contract primitives for the CommandLayer v1.1.0 current line.
+
+This package now models the two current-line contract families explicitly:
+
+- **Commons**: request/receipt payloads with no x402 or payment metadata assumptions.
+- **Commercial**: the same execution contract plus an explicit `commercial` metadata object for payment-aware runtimes.
+
+Legacy 1.0.0 helpers are still exported, but they are isolated and labeled as legacy bridges.
 
 ## What it provides
 
-- Request normalization (`payload` plus legacy `input` support)
-- JSON-schema validation client (AJV + remote schema loading)
-- Commons receipt build/canonicalize/hash/sign/verify helpers with explicit runtime layering
+- Current-line request normalization for Commons and Commercial flows
+- Current-line receipt builders, canonicalization, signing, and verification helpers
+- Explicit schema path helpers for the v1.1.0 split between Commons and Commercial
 - ENS signer discovery from TXT records
+- Legacy 1.0.0 receipt verification bridges for `metadata.proof` and `ed25519-sha256`
 - Compact AJV error formatting
 
 ## Install
@@ -16,49 +24,64 @@ Shared protocol engine for CommandLayer runtimes. This package centralizes the r
 npm install @commandlayer/runtime-core
 ```
 
-## Usage
+## Current-line usage
 
-### Normalize request
-
-```ts
-import { normalizeRequest } from '@commandlayer/runtime-core';
-
-const normalized = normalizeRequest({
-  x402: { plan: 'pro' },
-  trace: { id: 't-123' },
-  input: { message: 'hello' } // legacy alias
-});
-
-// => { x402, trace, payload }
-```
-
-### Validate request/receipt schemas
-
-```ts
-import { createSchemaClient, formatAjvErrors } from '@commandlayer/runtime-core';
-
-const schemas = createSchemaClient({
-  schemaHost: 'https://schemas.commandlayer.io',
-  timeoutMs: 5000
-});
-
-const validateRequest = await schemas.getRequestValidator({
-  tier: 'commercial',
-  verb: 'chat.completions',
-  version: 'v1'
-});
-
-const isValid = validateRequest({ payload: { message: 'hi' } });
-if (!isValid) {
-  console.error(formatAjvErrors(validateRequest.errors));
-}
-```
-
-### Build, sign, and verify receipts
+### Normalize Commons and Commercial requests
 
 ```ts
 import {
-  buildReceipt,
+  normalizeCommonsRequest,
+  normalizeCommercialRequest
+} from '@commandlayer/runtime-core';
+
+const commons = normalizeCommonsRequest({
+  trace: { request_id: 'req_1' },
+  payload: { message: 'hello' }
+});
+
+const commercial = normalizeCommercialRequest({
+  trace: { request_id: 'req_2' },
+  payload: { message: 'hello' },
+  commercial: { plan: 'pro', settlement: 'required' }
+});
+```
+
+### Resolve current-line schema URLs
+
+```ts
+import {
+  buildSchemaPath,
+  COMMAND_LAYER_CURRENT_LINE,
+  COMMONS_CONTRACT,
+  COMMERCIAL_CONTRACT,
+  createSchemaClient
+} from '@commandlayer/runtime-core';
+
+buildSchemaPath({
+  contract: COMMONS_CONTRACT,
+  verb: 'chat.completions',
+  kind: 'request'
+});
+// /schemas/1.1.0/commons/chat.completions/v1/request.schema.json
+
+const schemas = createSchemaClient({
+  schemaHost: 'https://schemas.commandlayer.io',
+  lineVersion: COMMAND_LAYER_CURRENT_LINE
+});
+
+const validateCommercialReceipt = await schemas.getReceiptValidator({
+  contract: COMMERCIAL_CONTRACT,
+  verb: 'chat.completions',
+  version: 'v1'
+});
+```
+
+### Build, sign, and verify current-line receipts
+
+```ts
+import {
+  buildCommonsReceipt,
+  buildCommercialReceipt,
   canonicalizeReceipt,
   createLayeredReceipt,
   hashReceiptCanonical,
@@ -66,37 +89,44 @@ import {
   verifyReceiptSignature
 } from '@commandlayer/runtime-core';
 
-const receipt = buildReceipt({
+const commonsReceipt = buildCommonsReceipt({
   verb: 'chat.completions',
   version: 'v1',
-  x402: { policy: 'standard' },
   trace: { request_id: 'req_1' },
   payload: { prompt: 'hello' },
   status: 'ok',
   result: { output: 'world' }
 });
 
-const canonical = canonicalizeReceipt(receipt);
-const hash = hashReceiptCanonical(canonical); // sha256 bytes
-
-const signed = signReceiptEd25519(receipt, {
-  privateKey: process.env.SIGNING_PRIVATE_KEY_PEM!,
-  signer_id: 'signer.commandlayer.eth',
-  kid: '2026-01',
-  canonical: 'json.sorted_keys.v1'
+const commercialReceipt = buildCommercialReceipt({
+  verb: 'chat.completions',
+  version: 'v1',
+  trace: { request_id: 'req_2' },
+  payload: { prompt: 'hello' },
+  commercial: { plan: 'pro', settlement: 'required' },
+  status: 'ok',
+  result: { output: 'world' }
 });
 
-const layered = createLayeredReceipt(receipt, {
+const canonical = canonicalizeReceipt(commercialReceipt);
+const hash = hashReceiptCanonical(canonical);
+
+const signed = signReceiptEd25519(commercialReceipt, {
+  privateKey: process.env.SIGNING_PRIVATE_KEY_PEM!,
+  signer_id: 'signer.commandlayer.eth',
+  kid: '2026-01'
+});
+
+const layered = createLayeredReceipt(commonsReceipt, {
   execution: { duration_ms: 42 }
 });
 
 const ok = verifyReceiptSignature(signed, {
-  pubkey: process.env.SIGNING_PUBLIC_KEY_PEM!,
-  canonical: 'json.sorted_keys.v1'
+  pubkey: process.env.SIGNING_PUBLIC_KEY_PEM!
 });
 ```
 
-`receipt` is the canonical Commons payload. Runtime metadata and signatures are layered alongside it rather than merged into the signed structure.
+`receipt` remains the canonical signed payload. Runtime metadata and signatures stay layered outside the receipt body.
 
 ### Resolve signer from ENS
 
@@ -109,24 +139,27 @@ const signer = await resolveSignerFromENS({
   ensName: 'signer.commandlayer.eth',
   provider
 });
-
-// signer.pubkeyRaw32 / signer.pubkeyEncoded / signer.kid / signer.canonical
 ```
 
 Supported TXT records:
 
 - Preferred: `cl.sig.pub = ed25519:<base64url_raw32>`
 - Optional: `cl.sig.kid`, `cl.sig.canonical`
-- Fallback: `cl.receipt.pubkey.pem` (SPKI PEM, Ed25519 public key)
+- Legacy fallback: `cl.receipt.pubkey.pem`
 
-## Publish
+## Legacy 1.0.0 bridge
 
-```bash
-npm ci
-npm test
-npm pack
-npm publish --access public
+If you still need old `metadata.proof` envelopes or `ed25519-sha256` receipts, import the isolated compatibility helpers:
+
+```ts
+import {
+  signReceiptEd25519Sha256,
+  toLegacyReceiptEnvelope,
+  verifyReceiptEd25519Sha256
+} from '@commandlayer/runtime-core/receipt-v1';
 ```
+
+These are explicitly legacy APIs and should not be used for new current-line Commons or Commercial flows.
 
 ## Development
 

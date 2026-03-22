@@ -1,9 +1,8 @@
 /**
- * Legacy v1 signing engine.
- * The canonical Commons receipt remains the signing payload.
- * Proof and runtime identifiers are layered outside that receipt.
+ * Legacy 1.0.0 receipt verification bridge.
+ * Kept only for consumers still reading metadata.proof or hash-bound ed25519-sha256 receipts.
  */
-export type ReceiptStatus = 'success' | 'error' | 'delegated';
+export type LegacyReceiptStatus = 'success' | 'error' | 'delegated';
 export type ReceiptProof = {
     alg: 'ed25519-sha256' | string;
     canonical: string;
@@ -13,19 +12,23 @@ export type ReceiptProof = {
     signature_b64?: string;
     signature?: string;
 };
-export type ReceiptBase = {
-    x402: {
-        verb: string;
-        version: string;
+export type LegacyReceiptBase = {
+    verb?: string;
+    version?: string;
+    x402?: {
         [k: string]: any;
     };
-    trace: {
-        trace_id: string;
+    trace?: {
         [k: string]: any;
     };
-    status: ReceiptStatus;
+    payload?: any;
+    status: LegacyReceiptStatus;
     result?: any;
     error?: any;
+    metadata?: Record<string, unknown> & {
+        proof?: ReceiptProof;
+        receipt_id?: string;
+    };
     [k: string]: any;
 };
 export type ReceiptSignatureLayer = {
@@ -33,26 +36,23 @@ export type ReceiptSignatureLayer = {
     receipt_id?: string;
 };
 export type LayeredReceiptV1 = {
-    receipt: ReceiptBase;
+    receipt: Omit<LegacyReceiptBase, 'metadata'>;
     runtime?: Record<string, unknown>;
     signature?: ReceiptSignatureLayer;
 };
-/** Build the canonical Commons receipt view used for hashing. */
-export declare function buildCanonicalReceipt(receipt: ReceiptBase): ReceiptBase;
-/** Compute canonical string + hash for the canonical Commons receipt. */
-export declare function computeReceiptCanonicalAndHash(receipt: ReceiptBase): {
+export declare function buildCanonicalReceipt(receipt: Omit<LegacyReceiptBase, 'metadata'>): Omit<LegacyReceiptBase, 'metadata'>;
+export declare function computeReceiptCanonicalAndHash(receipt: Omit<LegacyReceiptBase, 'metadata'>): {
     canonical: string;
     hash_sha256: string;
 };
-export type SignOptions = {
+export type LegacySignOptions = {
     signer_id: string;
     kid?: string;
     canonical?: string;
     privateKeyPem: string;
 };
-/** Attach a signature layer while preserving receipt/runtime separation. */
-export declare function signReceiptEd25519Sha256(receipt: ReceiptBase, opts: SignOptions): LayeredReceiptV1;
-export type VerifyOptions = {
+export declare function signReceiptEd25519Sha256(receipt: Omit<LegacyReceiptBase, 'metadata'>, opts: LegacySignOptions): LayeredReceiptV1;
+export type LegacyVerifyOptions = {
     publicKeyPemOrDer: string;
     allowedCanonicals?: string[];
     requireKid?: string;
@@ -67,12 +67,11 @@ export type VerifyReceiptResult = {
     reason?: string;
     checks: VerifyReceiptChecks;
 };
-/** Verify receipt signature + hash integrity over the canonical Commons receipt only. */
-export declare function verifyReceiptEd25519Sha256(receipt: LayeredReceiptV1 | ReceiptBase, opts: VerifyOptions): VerifyReceiptResult;
+export declare function verifyReceiptEd25519Sha256(receipt: LayeredReceiptV1 | LegacyReceiptBase, opts: LegacyVerifyOptions): VerifyReceiptResult;
 export declare function enforceCanonicalFromEns(layeredReceipt: LayeredReceiptV1, ensCanonical: string): {
     ok: boolean;
     reason?: string;
 };
-/** @deprecated Compatibility bridge for callers that still expect metadata.proof on the receipt object. */
-export declare function toLegacyReceiptEnvelope(layeredReceipt: LayeredReceiptV1): ReceiptBase;
+/** @deprecated Converts the legacy layered structure back into the 1.0.0 metadata envelope. */
+export declare function toLegacyReceiptEnvelope(layeredReceipt: LayeredReceiptV1): LegacyReceiptBase;
 //# sourceMappingURL=receipt-v1.d.ts.map

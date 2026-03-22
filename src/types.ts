@@ -1,33 +1,69 @@
 import type { ErrorObject, ValidateFunction } from 'ajv';
 
-export interface NormalizedRequest {
-  x402: unknown;
-  trace: unknown;
-  payload: unknown;
+export const COMMAND_LAYER_CURRENT_LINE = '1.1.0' as const;
+export const DEFAULT_SCHEMA_VERSION = 'v1' as const;
+export const COMMONS_CONTRACT = 'commons' as const;
+export const COMMERCIAL_CONTRACT = 'commercial' as const;
+export const DEFAULT_CANONICAL_ID = 'json.sorted_keys.v1' as const;
+
+export type CommandLayerLineVersion = typeof COMMAND_LAYER_CURRENT_LINE;
+export type SchemaVersion = typeof DEFAULT_SCHEMA_VERSION | string;
+export type ContractTier = typeof COMMONS_CONTRACT | typeof COMMERCIAL_CONTRACT;
+export type ReceiptStatus = 'ok' | 'error';
+
+export interface TraceContext {
+  [key: string]: unknown;
 }
+
+export interface CommonsRequest {
+  payload: unknown;
+  trace?: TraceContext;
+}
+
+export interface CommercialTerms {
+  [key: string]: unknown;
+}
+
+export interface CommercialRequest extends CommonsRequest {
+  commercial: CommercialTerms;
+}
+
+export type NormalizedRequest = CommonsRequest;
+export type NormalizedCommercialRequest = CommercialRequest;
 
 export interface SchemaClientOptions {
   schemaHost: string;
   timeoutMs?: number;
+  lineVersion?: CommandLayerLineVersion;
 }
 
 export interface ValidatorRequest {
-  tier: string;
+  contract: ContractTier;
   verb: string;
-  version: string;
+  version?: SchemaVersion;
+  lineVersion?: CommandLayerLineVersion;
 }
 
 export type AsyncValidator = ValidateFunction;
 
 export interface CommonsReceipt {
+  line: CommandLayerLineVersion;
+  contract: typeof COMMONS_CONTRACT;
   verb: string;
-  version: string;
-  x402: unknown;
-  trace: unknown;
+  version: SchemaVersion;
+  trace?: TraceContext;
   payload: unknown;
-  status: string;
-  result: unknown;
+  status: ReceiptStatus;
+  result?: unknown;
+  error?: unknown;
 }
+
+export interface CommercialReceipt extends Omit<CommonsReceipt, 'contract'> {
+  contract: typeof COMMERCIAL_CONTRACT;
+  commercial: CommercialTerms;
+}
+
+export type CommandLayerReceipt = CommonsReceipt | CommercialReceipt;
 
 export interface ReceiptRuntimeMetadata {
   [key: string]: unknown;
@@ -45,24 +81,24 @@ export interface SignedReceiptLayer {
   proof: Proof;
 }
 
-export interface LayeredReceipt {
-  receipt: CommonsReceipt;
+export interface LayeredReceipt<TReceipt extends CommandLayerReceipt = CommandLayerReceipt> {
+  receipt: TReceipt;
   runtime?: ReceiptRuntimeMetadata;
 }
 
-export interface SignedLayeredReceipt extends LayeredReceipt {
+export interface SignedLayeredReceipt<TReceipt extends CommandLayerReceipt = CommandLayerReceipt> extends LayeredReceipt<TReceipt> {
   signature: SignedReceiptLayer;
 }
 
-/**
- * @deprecated Use CommonsReceipt for the canonical signed payload.
- */
-export type UnsignedReceipt = CommonsReceipt;
-
-/**
- * @deprecated Use SignedLayeredReceipt to keep signature material outside the receipt.
- */
-export interface SignedReceipt extends CommonsReceipt {
+/** @deprecated Legacy 1.0.0 envelope; use CommandLayerReceipt. */
+export interface LegacySignedReceiptEnvelope {
+  verb?: string;
+  version?: string;
+  x402?: unknown;
+  trace?: unknown;
+  payload?: unknown;
+  status?: string;
+  result?: unknown;
   metadata: Record<string, unknown> & {
     proof: Proof;
   };
