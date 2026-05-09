@@ -9,7 +9,7 @@ export const DEFAULT_CANONICAL_ID = 'json.sorted_keys.v1' as const;
 export type CommandLayerLineVersion = typeof COMMAND_LAYER_CURRENT_LINE;
 export type SchemaVersion = typeof DEFAULT_SCHEMA_VERSION | string;
 export type ContractTier = typeof COMMONS_CONTRACT | typeof COMMERCIAL_CONTRACT;
-export type ReceiptStatus = 'ok' | 'error';
+export type ReceiptStatus = 'success' | 'error';
 
 export interface TraceContext {
   [key: string]: unknown;

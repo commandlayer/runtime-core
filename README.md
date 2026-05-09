@@ -94,7 +94,7 @@ const commonsReceipt = buildCommonsReceipt({
   version: 'v1',
   trace: { request_id: 'req_1' },
   payload: { prompt: 'hello' },
-  status: 'ok',
+  status: 'success',
   result: { output: 'world' }
 });
 
@@ -104,7 +104,7 @@ const commercialReceipt = buildCommercialReceipt({
   trace: { request_id: 'req_2' },
   payload: { prompt: 'hello' },
   commercial: { plan: 'pro', settlement: 'required' },
-  status: 'ok',
+  status: 'success',
   result: { output: 'world' }
 });
 
