@@ -1,16 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { fromBase64Url, toBase64Url } from './encoding.js';
+import { canonicalizeSortedKeysV1 } from './canonical.js';
 import { COMMAND_LAYER_CURRENT_LINE, COMMONS_CONTRACT, COMMERCIAL_CONTRACT, DEFAULT_CANONICAL_ID } from './types.js';
-function sortValue(value) {
-    if (Array.isArray(value))
-        return value.map(sortValue);
-    if (value && typeof value === 'object') {
-        return Object.fromEntries(Object.entries(value)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, val]) => [key, sortValue(val)]));
-    }
-    return value;
-}
 function toEd25519PublicSpki(raw32) {
     if (raw32.length !== 32)
         throw new Error('Ed25519 public key must be 32 bytes');
@@ -72,7 +63,7 @@ export function createLayeredReceipt(receipt, runtime) {
     };
 }
 export function canonicalizeReceipt(receipt) {
-    return JSON.stringify(sortValue(buildReceipt(receipt)));
+    return canonicalizeSortedKeysV1(buildReceipt(receipt));
 }
 export function hashReceiptCanonical(canonical) {
     return createHash('sha256').update(canonical, 'utf8').digest();

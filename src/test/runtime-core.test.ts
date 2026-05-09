@@ -74,18 +74,18 @@ test('canonicalize + hash are deterministic on current-line Commons receipts', (
     version: 'v1',
     trace: { z: 'last', a: 'first' },
     payload: { two: 2, one: 1 },
-    status: 'ok',
+    status: 'success',
     result: { arr: [{ y: 2, x: 1 }] }
   });
 
   const canonical = canonicalizeReceipt(fixture);
   assert.equal(
     canonical,
-    '{"contract":"commons","line":"1.1.0","payload":{"one":1,"two":2},"result":{"arr":[{"x":1,"y":2}]},"status":"ok","trace":{"a":"first","z":"last"},"verb":"test.verb","version":"v1"}'
+    '{"contract":"commons","line":"1.1.0","payload":{"one":1,"two":2},"result":{"arr":[{"x":1,"y":2}]},"status":"success","trace":{"a":"first","z":"last"},"verb":"test.verb","version":"v1"}'
   );
 
   const hash = Buffer.from(hashReceiptCanonical(canonical)).toString('hex');
-  assert.equal(hash, '51b9aeefb9b41a4f8b1c1ae94c996e2dfef440721f30c5185cfe8c6d2354a628');
+  assert.equal(hash, 'b0ba4d1761e9cdc73974742327e26801939a8d9b7082de47935d742d9bfc95f9');
 });
 
 test('createLayeredReceipt preserves current-line receipt/runtime separation', () => {
@@ -95,7 +95,7 @@ test('createLayeredReceipt preserves current-line receipt/runtime separation', (
       version: 'v1',
       trace: { request_id: 'req_1' },
       payload: { hello: 'world' },
-      status: 'ok',
+      status: 'success',
       result: { ok: true }
     }),
     { execution: { duration_ms: 12 } }
@@ -111,7 +111,7 @@ test('createLayeredReceipt preserves current-line receipt/runtime separation', (
       commercial: { plan: 'pro' },
       trace: { request_id: 'req_2' },
       payload: { hello: 'world' },
-      status: 'ok',
+      status: 'success',
       result: { ok: true }
     })
   );
@@ -130,7 +130,7 @@ test('sign/verify pipeline keeps proof outside the canonical receipt', () => {
       commercial: { settlement: 'required' },
       trace: {},
       payload: { hello: 'world' },
-      status: 'ok',
+      status: 'success',
       result: { ok: true }
     }),
     {

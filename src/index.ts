@@ -8,4 +8,3 @@ export * from './canonical.js';
 export * from './crypto.js';
 export * from './receipt-v1.js';
 export * from './encoding.js';
-export * from './ens.verify.js';
