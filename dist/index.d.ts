@@ -1,11 +1,20 @@
-export * from './types.js';
-export * from './ens.js';
-export * from './schema-client.js';
-export * from './errors.js';
-export * from './normalize.js';
-export * from './receipt.js';
-export * from './canonical.js';
-export * from './crypto.js';
-export * from './receipt-v1.js';
-export * from './encoding.js';
+/**
+ * @commandlayer/runtime-core
+ *
+ * The single protocol implementation artifact for the CommandLayer ecosystem.
+ * All other repos import from here — nothing is reimplemented downstream.
+ *
+ * Public API surface:
+ *   - Protocol constants
+ *   - Canonicalization (json.sorted_keys.v1)
+ *   - Ed25519 crypto (sign, verify, key encoding)
+ *   - ENS resolution
+ *   - Receipt building and verification (v1.1.0)
+ *   - Test vectors
+ */
+export { PROTOCOL_VERSION, CANONICAL_METHOD, SIGNATURE_ALG, ENS_KEY_PUB, ENS_KEY_KID, ENS_KEY_CANONICAL, ENS_KEY_SIGNER, } from "./crypto.js";
+export { canonicalize, CANONICAL_TEST_VECTORS } from "./canonicalize.js";
+export { encodePublicKey, parsePublicKey, signCanonical, verifyCanonical, verifyCanonicalWithRawKey, generateEd25519KeyPair, type Ed25519KeyPair, } from "./crypto.js";
+export { resolveSignerFromENS, resolvePublicKeyFromENS, type EnsSignerRecord, type EnsProvider, type EnsResolver, } from "./ens.js";
+export { signReceipt, verifyReceipt, isSignedLayeredReceipt, type ReceiptPayload, type ReceiptProof, type SignedLayeredReceipt, type SignReceiptOptions, type VerifyReceiptResult, type VerifyReceiptOptions, } from "./receipt.js";
 //# sourceMappingURL=index.d.ts.map
