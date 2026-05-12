@@ -8,6 +8,7 @@
  */
 
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import {
   generateEd25519KeyPair,
@@ -115,7 +116,7 @@ describe("sign and verify — round trip", () => {
 });
 
 describe("sign and verify — signing message is raw bytes", () => {
-  it("signing message is raw canonical UTF-8, not sha256 hex", () => {
+  it("signing message is raw canonical UTF-8, not sha256 hex", async () => {
     // This test documents and enforces the protocol decision:
     // we sign raw bytes, not sha256(canonical).
     // If this ever needs to change, it requires a protocol version bump.
@@ -130,7 +131,6 @@ describe("sign and verify — signing message is raw bytes", () => {
     assert.strictEqual(verifyCanonical(canonical, sig, publicKeyPem), true);
 
     // Verification with sha256(canonical) would fail — different message
-    const { createHash } = await import("node:crypto");
     const sha256hex = createHash("sha256").update(canonical, "utf8").digest("hex");
     // sha256hex is a different string — if someone signs this instead, verify fails
     assert.strictEqual(verifyCanonical(sha256hex, sig, publicKeyPem), false);
