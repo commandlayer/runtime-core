@@ -53,8 +53,8 @@ export function createSchemaClient(options: SchemaClientOptions): SchemaClient {
     if (!ajvPromise) {
       ajvPromise = (async () => {
         const ajvModule = await import('ajv');
-        const Ajv = ajvModule.default;
-        return new Ajv({
+        const AjvCtor = ajvModule.default as unknown as new (options: { strict: boolean; allErrors: boolean; loadSchema: (uri: string) => Promise<object>; }) => AjvLike;
+        return new AjvCtor({
           strict: true,
           allErrors: true,
           loadSchema: async (uri: string) => (await fetchJson(uri)) as object
