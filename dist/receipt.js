@@ -1,119 +1,155 @@
-import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
-import { fromBase64Url, toBase64Url } from './encoding.js';
-import { canonicalizeSortedKeysV1 } from './canonical.js';
-import { COMMAND_LAYER_CURRENT_LINE, COMMONS_CONTRACT, COMMERCIAL_CONTRACT, DEFAULT_CANONICAL_ID } from './types.js';
-function toEd25519PublicSpki(raw32) {
-    if (raw32.length !== 32)
-        throw new Error('Ed25519 public key must be 32 bytes');
-    const prefix = Buffer.from('302a300506032b6570032100', 'hex');
-    return Buffer.concat([prefix, Buffer.from(raw32)]);
+/**
+ * @commandlayer/runtime-core — receipt.ts
+ *
+ * v1.1.0 signed layered receipt builder and verifier.
+ *
+ * Proof field names (canonical, matches clas schema):
+ *   proof.alg        — signature algorithm ("ed25519")
+ *   proof.kid        — key identifier (from ENS cl.sig.kid)
+ *   proof.signer_id  — ENS name of signer (e.g. runtime.commandlayer.eth)
+ *   proof.canonical  — canonicalization method ("json.sorted_keys.v1")
+ *   proof.signature  — standard base64-encoded Ed25519 signature (64 bytes)
+ */
+import { canonicalize, CANONICAL_METHOD } from "./canonicalize.js";
+import { signCanonical, verifyCanonical, verifyCanonicalWithRawKey, SIGNATURE_ALG, PROTOCOL_VERSION, } from "./crypto.js";
+/**
+ * Build and sign a v1.1.0 layered receipt.
+ *
+ * Signing message: raw UTF-8 bytes of canonicalize(receipt)
+ * Output signature: standard base64 (64 bytes)
+ */
+export function signReceipt(payload, opts) {
+    // Validate required fields
+    if (!payload.verb)
+        throw new Error("receipt.verb is required");
+    if (!payload.agent)
+        throw new Error("receipt.agent is required");
+    if (!payload.timestamp)
+        throw new Error("receipt.timestamp is required");
+    const canonical = canonicalize(payload);
+    const signature = signCanonical(canonical, opts.privateKeyPem);
+    return {
+        receipt: payload,
+        signature: {
+            proof: {
+                alg: SIGNATURE_ALG,
+                kid: opts.kid,
+                signer_id: opts.signerEns,
+                canonical: CANONICAL_METHOD,
+                signature,
+            },
+        },
+    };
 }
-function normalizePrivateKey(privateKey) {
-    return typeof privateKey === 'string'
-        ? createPrivateKey(privateKey)
-        : createPrivateKey({ key: Buffer.from(privateKey), format: 'der', type: 'pkcs8' });
-}
-function normalizePublicKey(pubkey) {
-    if (typeof pubkey === 'string') {
-        if (pubkey.includes('BEGIN PUBLIC KEY'))
-            return createPublicKey(pubkey);
-        return createPublicKey({ key: toEd25519PublicSpki(fromBase64Url(pubkey)), format: 'der', type: 'spki' });
+/**
+ * Verify a v1.1.0 signed layered receipt.
+ *
+ * Returns a detailed result with per-check breakdown.
+ * Never throws on invalid signature — only throws on missing required options.
+ */
+export function verifyReceipt(receipt, opts) {
+    if (!opts.rawPublicKey && !opts.publicKeyPem) {
+        throw new Error("verifyReceipt requires either rawPublicKey or publicKeyPem");
     }
-    if (pubkey.length === 32) {
-        return createPublicKey({ key: toEd25519PublicSpki(pubkey), format: 'der', type: 'spki' });
+    const checks = {
+        structureValid: false,
+        algValid: false,
+        kidMatched: false,
+        signerMatched: false,
+        signatureValid: false,
+    };
+    // Structure check
+    if (!receipt?.receipt ||
+        !receipt?.signature?.proof?.signature ||
+        !receipt?.signature?.proof?.alg ||
+        !receipt?.signature?.proof?.signer_id) {
+        return {
+            valid: false,
+            checks,
+            reason: "Receipt is missing required structure fields",
+        };
     }
-    return createPublicKey({ key: Buffer.from(pubkey), format: 'der', type: 'spki' });
-}
-export function buildCommonsReceipt(input) {
-    return {
-        line: COMMAND_LAYER_CURRENT_LINE,
-        contract: COMMONS_CONTRACT,
-        verb: input.verb,
-        version: input.version,
-        payload: input.payload,
-        status: input.status,
-        ...(input.trace ? { trace: input.trace } : {}),
-        ...(Object.prototype.hasOwnProperty.call(input, 'result') ? { result: input.result } : {}),
-        ...(Object.prototype.hasOwnProperty.call(input, 'error') ? { error: input.error } : {})
-    };
-}
-export function buildCommercialReceipt(input) {
-    const commons = buildCommonsReceipt({
-        verb: input.verb,
-        version: input.version,
-        trace: input.trace,
-        payload: input.payload,
-        status: input.status,
-        ...(Object.prototype.hasOwnProperty.call(input, 'result') ? { result: input.result } : {}),
-        ...(Object.prototype.hasOwnProperty.call(input, 'error') ? { error: input.error } : {})
-    });
-    return {
-        ...commons,
-        contract: COMMERCIAL_CONTRACT,
-        commercial: { ...input.commercial }
-    };
-}
-export function buildReceipt(input) {
-    return input.contract === COMMERCIAL_CONTRACT ? buildCommercialReceipt(input) : buildCommonsReceipt(input);
-}
-export function createLayeredReceipt(receipt, runtime) {
-    return {
-        receipt: buildReceipt(receipt),
-        ...(runtime ? { runtime: { ...runtime } } : {})
-    };
-}
-export function canonicalizeReceipt(receipt) {
-    return canonicalizeSortedKeysV1(buildReceipt(receipt));
-}
-export function hashReceiptCanonical(canonical) {
-    return createHash('sha256').update(canonical, 'utf8').digest();
-}
-export function attachProof(receipt, options) {
-    const proof = {
-        alg: options.alg,
-        signer_id: options.signer_id,
-        canonical: options.canonical,
-        signature: options.signature,
-        ...(options.kid ? { kid: options.kid } : {})
-    };
-    return {
-        receipt: buildReceipt(receipt),
-        signature: { proof }
-    };
-}
-export function signReceiptEd25519(receipt, options) {
-    const canonical = options.canonical ?? DEFAULT_CANONICAL_ID;
-    const signature = cryptoSign(null, Buffer.from(canonicalizeReceipt(receipt), 'utf8'), normalizePrivateKey(options.privateKey));
-    return attachProof(receipt, {
-        alg: 'ed25519',
-        kid: options.kid,
-        signer_id: options.signer_id,
-        canonical,
-        signature: toBase64Url(new Uint8Array(signature))
-    });
-}
-export function verifyReceiptSignature(receipt, options) {
-    const canonical = options.canonical ?? DEFAULT_CANONICAL_ID;
-    const proof = receipt.signature?.proof;
-    if (!proof || proof.alg !== 'ed25519' || proof.canonical !== canonical)
-        return false;
-    return cryptoVerify(null, Buffer.from(canonicalizeReceipt(receipt.receipt), 'utf8'), normalizePublicKey(options.pubkey), Buffer.from(fromBase64Url(proof.signature)));
-}
-/** @deprecated Legacy 1.0.0 metadata.proof envelope. */
-export function toLegacySignedReceipt(receipt, runtimeMetadata = {}) {
-    const built = buildReceipt(receipt.receipt);
-    return {
-        ...(built.contract === COMMERCIAL_CONTRACT ? { x402: built.commercial } : {}),
-        verb: built.verb,
-        version: String(built.version),
-        ...(built.trace ? { trace: built.trace } : {}),
-        payload: built.payload,
-        status: built.status,
-        ...(Object.prototype.hasOwnProperty.call(built, 'result') ? { result: built.result } : {}),
-        metadata: {
-            ...runtimeMetadata,
-            proof: receipt.signature.proof
+    checks.structureValid = true;
+    const proof = receipt.signature.proof;
+    // Algorithm check
+    if (proof.alg !== SIGNATURE_ALG) {
+        return {
+            valid: false,
+            checks,
+            reason: `Unsupported algorithm "${proof.alg}". Only "${SIGNATURE_ALG}" is supported.`,
+        };
+    }
+    checks.algValid = true;
+    // Kid check (if expected)
+    checks.kidMatched = opts.expectedKid
+        ? proof.kid === opts.expectedKid
+        : true;
+    // Signer check (if expected)
+    checks.signerMatched = opts.expectedSigner
+        ? proof.signer_id === opts.expectedSigner
+        : true;
+    // Signature verification
+    let canonical;
+    try {
+        canonical = canonicalize(receipt.receipt);
+    }
+    catch (err) {
+        return {
+            valid: false,
+            checks,
+            reason: `Canonicalization failed: ${err.message}`,
+        };
+    }
+    try {
+        if (opts.rawPublicKey) {
+            checks.signatureValid = verifyCanonicalWithRawKey(canonical, proof.signature, opts.rawPublicKey);
         }
+        else {
+            checks.signatureValid = verifyCanonical(canonical, proof.signature, opts.publicKeyPem);
+        }
+    }
+    catch (err) {
+        return {
+            valid: false,
+            checks,
+            reason: `Signature verification error: ${err.message}`,
+        };
+    }
+    // ALL checks must pass for valid: true
+    const valid = checks.structureValid &&
+        checks.algValid &&
+        checks.kidMatched &&
+        checks.signerMatched &&
+        checks.signatureValid;
+    return {
+        valid,
+        checks,
+        reason: valid
+            ? undefined
+            : Object.entries(checks)
+                .filter(([, v]) => !v)
+                .map(([k]) => `${k} failed`)
+                .join(", "),
     };
 }
+/**
+ * Type guard: check if an unknown value is a SignedLayeredReceipt.
+ */
+export function isSignedLayeredReceipt(value) {
+    if (typeof value !== "object" || value === null)
+        return false;
+    const v = value;
+    if (typeof v.receipt !== "object" || v.receipt === null)
+        return false;
+    if (typeof v.signature !== "object" || v.signature === null)
+        return false;
+    const sig = v.signature;
+    if (typeof sig.proof !== "object" || sig.proof === null)
+        return false;
+    const proof = sig.proof;
+    return (typeof proof.alg === "string" &&
+        typeof proof.signature === "string" &&
+        typeof proof.signer_id === "string");
+}
+export { PROTOCOL_VERSION };
 //# sourceMappingURL=receipt.js.map

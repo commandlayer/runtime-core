@@ -1,75 +1,138 @@
-import { extractEd25519Raw32FromSpkiDer, fromBase64Url, parsePemToDer, toBase64Url } from './encoding.js';
-import type { EnsResolveOptions, EnsSignerInfo } from './types.js';
+/**
+ * @commandlayer/runtime-core — ens.ts
+ *
+ * ENS text record resolution for CommandLayer signer keys.
+ *
+ * ENS record format (production, locked):
+ *   cl.sig.pub       = ed25519:<standard_base64_raw32>
+ *   cl.sig.kid       = <short key identifier, e.g. vC4WbcNoq2znSCiQ>
+ *   cl.sig.canonical = json.sorted_keys.v1
+ *   cl.receipt.signer = <ens name>
+ *
+ * NO hardcoded fallback keys. ENS resolution failure is a hard error.
+ * If you need test fixtures, use test/fixtures/ens-mock.ts.
+ */
 
-const TXT_SIG_PUB = 'cl.sig.pub';
-const TXT_SIG_KID = 'cl.sig.kid';
-const TXT_SIG_CANONICAL = 'cl.sig.canonical';
-const TXT_RECEIPT_PEM = 'cl.receipt.pubkey.pem';
+import {
+  ENS_KEY_PUB,
+  ENS_KEY_KID,
+  ENS_KEY_CANONICAL,
+  ENS_KEY_SIGNER,
+  CANONICAL_METHOD,
+  parsePublicKey,
+} from "./crypto.js";
 
-function collapseTxt(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    const flattened = value.flat(Infinity as 1).filter((v): v is string => typeof v === 'string');
-    return flattened.join('');
-  }
-  return undefined;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface EnsSignerRecord {
+  /** ENS name, e.g. runtime.commandlayer.eth */
+  name: string;
+  /** Raw 32-byte Ed25519 public key */
+  rawPublicKey: Uint8Array;
+  /** Short key identifier from cl.sig.kid */
+  kid: string;
+  /** Canonicalization method from cl.sig.canonical */
+  canonical: string;
 }
 
-async function resolveTextRecord(provider: any, ensName: string, key: string): Promise<string | undefined> {
-  if (!provider) {
-    throw new Error('ENS provider is required');
-  }
-
-  if (typeof provider.getText === 'function') {
-    const val = await provider.getText(ensName, key);
-    return collapseTxt(val);
-  }
-
-  if (typeof provider.getResolver === 'function') {
-    const resolver = await provider.getResolver(ensName);
-    if (resolver && typeof resolver.getText === 'function') {
-      const val = await resolver.getText(key);
-      return collapseTxt(val);
-    }
-  }
-
-  throw new Error('Unsupported ENS provider interface');
+/**
+ * Minimal ENS provider interface.
+ * Compatible with ethers v6 EnsResolver and any custom resolver.
+ */
+export interface EnsProvider {
+  getResolver(name: string): Promise<EnsResolver | null>;
 }
 
-function parseSigPub(raw: string): Uint8Array {
-  const [alg, encoded] = raw.split(':', 2);
-  if (alg !== 'ed25519' || !encoded) {
-    throw new Error('Invalid cl.sig.pub format; expected ed25519:<base64url_raw32>');
-  }
-  const decoded = fromBase64Url(encoded);
-  if (decoded.length !== 32) {
-    throw new Error('Invalid cl.sig.pub key length, expected 32 bytes');
-  }
-  return decoded;
+export interface EnsResolver {
+  getText(key: string): Promise<string | null>;
 }
 
-export async function resolveSignerFromENS(options: EnsResolveOptions): Promise<EnsSignerInfo> {
-  const sigPub = await resolveTextRecord(options.provider, options.ensName, TXT_SIG_PUB);
-  const kid = await resolveTextRecord(options.provider, options.ensName, TXT_SIG_KID);
-  const canonical = await resolveTextRecord(options.provider, options.ensName, TXT_SIG_CANONICAL);
+// ── Resolution ────────────────────────────────────────────────────────────────
 
-  let raw32: Uint8Array;
-  if (sigPub) {
-    raw32 = parseSigPub(sigPub);
-  } else {
-    const pem = await resolveTextRecord(options.provider, options.ensName, TXT_RECEIPT_PEM);
-    if (!pem) {
-      throw new Error('No signer key TXT records found on ENS name');
-    }
-    raw32 = extractEd25519Raw32FromSpkiDer(parsePemToDer(pem));
+/**
+ * Resolve a CommandLayer signer record from ENS.
+ *
+ * Throws on:
+ * - No resolver found for the ENS name
+ * - Missing cl.sig.pub record
+ * - Malformed cl.sig.pub (not ed25519: prefix or wrong key length)
+ * - cl.sig.canonical mismatch (if present and not json.sorted_keys.v1)
+ *
+ * Never falls back to hardcoded keys.
+ */
+export async function resolveSignerFromENS(
+  ensName: string,
+  provider: EnsProvider
+): Promise<EnsSignerRecord> {
+  let resolver: EnsResolver | null;
+  try {
+    resolver = await provider.getResolver(ensName);
+  } catch (err) {
+    throw new Error(
+      `ENS resolution failed for "${ensName}": ${(err as Error).message}`
+    );
   }
+
+  if (!resolver) {
+    throw new Error(
+      `No ENS resolver found for "${ensName}". ` +
+        `Verify the name is registered and has a resolver set.`
+    );
+  }
+
+  // Fetch all relevant text records in parallel
+  let pubValue: string | null;
+  let kidValue: string | null;
+  let canonicalValue: string | null;
+
+  try {
+    [pubValue, kidValue, canonicalValue] = await Promise.all([
+      resolver.getText(ENS_KEY_PUB),
+      resolver.getText(ENS_KEY_KID),
+      resolver.getText(ENS_KEY_CANONICAL),
+    ]);
+  } catch (err) {
+    throw new Error(
+      `Failed to fetch ENS text records for "${ensName}": ${
+        (err as Error).message
+      }`
+    );
+  }
+
+  if (!pubValue) {
+    throw new Error(
+      `ENS name "${ensName}" has no ${ENS_KEY_PUB} text record. ` +
+        `Set cl.sig.pub = ed25519:<standard_base64_raw32> on the ENS name.`
+    );
+  }
+
+  // Validate canonical method if present
+  if (canonicalValue && canonicalValue !== CANONICAL_METHOD) {
+    throw new Error(
+      `ENS name "${ensName}" specifies unsupported canonical method: ` +
+        `"${canonicalValue}". Only "${CANONICAL_METHOD}" is supported.`
+    );
+  }
+
+  // Parse the public key — throws on malformed input
+  const rawPublicKey = parsePublicKey(pubValue);
 
   return {
-    pubkeyRaw32: raw32,
-    pubkeyEncoded: toBase64Url(raw32),
-    kid: kid || undefined,
-    canonical: canonical || undefined,
-    signer_id: options.ensName,
-    alg: 'ed25519'
+    name: ensName,
+    rawPublicKey,
+    kid: kidValue ?? "",
+    canonical: canonicalValue ?? CANONICAL_METHOD,
   };
+}
+
+/**
+ * Resolve the public key only (convenience wrapper).
+ * Use resolveSignerFromENS for full record access.
+ */
+export async function resolvePublicKeyFromENS(
+  ensName: string,
+  provider: EnsProvider
+): Promise<Uint8Array> {
+  const record = await resolveSignerFromENS(ensName, provider);
+  return record.rawPublicKey;
 }
