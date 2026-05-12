@@ -1,42 +1,77 @@
 {
   "name": "@commandlayer/runtime-core",
   "version": "1.1.0",
-  "description": "Core contract primitives for CommandLayer v1.1.0 runtimes",
+  "description": "CommandLayer protocol core — canonicalization, Ed25519 crypto, receipt signing/verification, ENS resolution",
+  "license": "Apache-2.0",
+  "author": "CommandLayer <team@commandlayer.org>",
+  "homepage": "https://commandlayer.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/commandlayer/runtime-core.git"
+  },
   "type": "module",
-  "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
+    "./canonicalize": {
+      "import": "./dist/canonicalize.js",
+      "types": "./dist/canonicalize.d.ts"
     },
-    "./receipt-v1": {
-      "types": "./dist/receipt-v1.d.ts",
-      "import": "./dist/receipt-v1.js"
+    "./crypto": {
+      "import": "./dist/crypto.js",
+      "types": "./dist/crypto.d.ts"
+    },
+    "./ens": {
+      "import": "./dist/ens.js",
+      "types": "./dist/ens.d.ts"
+    },
+    "./receipt": {
+      "import": "./dist/receipt.js",
+      "types": "./dist/receipt.d.ts"
     }
   },
   "files": [
-    "dist",
+    "dist/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist",
-    "test": "npm run build && node --test dist/test/*.test.js tests/*.test.mjs",
-    "prepack": "npm run clean && npm run build"
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "node --test --require tsx/esm test/**/*.test.ts",
+    "test:build": "npm run build && node --test dist/test/**/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "ajv": "^8.17.1",
-    "ethers": "^6.0.0"
+    "ethers": "^6.13.0"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
-    "typescript": "^5.8.2"
-  }
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "commandlayer",
+    "agent",
+    "receipt",
+    "ed25519",
+    "ens",
+    "protocol",
+    "verification",
+    "signing",
+    "canonicalization"
+  ]
 }
