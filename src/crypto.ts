@@ -11,7 +11,7 @@
  * coordinated migration across all repos.
  */
 
-import { createSign, createVerify, generateKeyPairSync } from "node:crypto";
+import { sign, verify, generateKeyPairSync } from "node:crypto";
 
 // ── Protocol constants ────────────────────────────────────────────────────────
 
@@ -79,10 +79,7 @@ export function signCanonical(
   canonicalString: string,
   privateKeyPem: string
 ): string {
-  const sign = createSign("Ed25519");
-  sign.update(canonicalString, "utf8");
-  sign.end();
-  const sigBuffer = sign.sign(privateKeyPem);
+  const sigBuffer = sign(null, Buffer.from(canonicalString, "utf8"), privateKeyPem);
   if (sigBuffer.length !== 64) {
     throw new Error(
       `Ed25519 signature must be 64 bytes, got ${sigBuffer.length}`
@@ -113,10 +110,7 @@ export function verifyCanonical(
     );
   }
   try {
-    const verify = createVerify("Ed25519");
-    verify.update(canonicalString, "utf8");
-    verify.end();
-    return verify.verify(publicKeyPem, sigBuffer);
+    return verify(null, Buffer.from(canonicalString, "utf8"), publicKeyPem, sigBuffer);
   } catch {
     return false;
   }

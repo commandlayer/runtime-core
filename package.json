@@ -43,7 +43,7 @@
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "test": "node --test --require tsx/esm test/**/*.test.ts",
+    "test": "node --test --import tsx/esm test/**/*.test.ts",
     "test:build": "npm run build && node --test dist/test/**/*.test.js",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm test"
