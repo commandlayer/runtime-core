@@ -32,6 +32,10 @@
     "./receipt": {
       "import": "./dist/receipt.js",
       "types": "./dist/receipt.d.ts"
+    },
+    "./compat": {
+      "import": "./dist/compat.js",
+      "types": "./dist/compat.d.ts"
     }
   },
   "files": [
@@ -43,6 +47,7 @@
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
+    "prepare": "npm run build",
     "test": "node --test --import tsx/esm test/**/*.test.ts",
     "test:build": "npm run build && node --test dist/test/**/*.test.js",
     "typecheck": "tsc --noEmit",

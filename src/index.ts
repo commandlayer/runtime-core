@@ -11,6 +11,7 @@
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
  *   - Test vectors
+ *   - Backward-compatibility shims (for runtime/server.mjs)
  */
 
 // Protocol constants
@@ -59,3 +60,16 @@ export {
   type VerifyReceiptResult,
   type VerifyReceiptOptions,
 } from "./receipt.js";
+
+// Backward-compatibility shims (for runtime/server.mjs)
+export {
+  CANONICAL_ID_SORTED_KEYS_V1,
+  signReceiptEd25519Sha256,
+  verifyReceiptEd25519Sha256,
+  type RuntimeReceipt,
+  type RuntimeProof,
+  type SignReceiptCompatOptions,
+  type SignedRuntimeReceipt,
+  type VerifyReceiptCompatOptions,
+  type VerifyReceiptCompatResult,
+} from "./compat.js";
