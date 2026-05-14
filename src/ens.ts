@@ -17,10 +17,12 @@ import {
   ENS_KEY_PUB,
   ENS_KEY_KID,
   ENS_KEY_CANONICAL,
-  ENS_KEY_SIGNER,
   CANONICAL_METHOD,
   parsePublicKey,
 } from "./crypto.js";
+
+// Re-export so callers can reference the constant without importing crypto directly
+export { ENS_KEY_SIGNER } from "./crypto.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,10 +49,27 @@ export interface EnsResolver {
   getText(key: string): Promise<string | null>;
 }
 
+/**
+ * Options object form of resolveSignerFromENS.
+ * Use this when calling from code that prefers named parameters.
+ */
+export interface ResolveSignerFromENSOptions {
+  ensName: string;
+  provider: EnsProvider;
+}
+
 // ── Resolution ────────────────────────────────────────────────────────────────
 
 /**
  * Resolve a CommandLayer signer record from ENS.
+ *
+ * Accepts either positional arguments or a single options object:
+ *
+ *   // Positional (preferred in library code):
+ *   await resolveSignerFromENS('signer.commandlayer.eth', provider);
+ *
+ *   // Options object (preferred in application code):
+ *   await resolveSignerFromENS({ ensName: 'signer.commandlayer.eth', provider });
  *
  * Throws on:
  * - No resolver found for the ENS name
@@ -61,9 +80,30 @@ export interface EnsResolver {
  * Never falls back to hardcoded keys.
  */
 export async function resolveSignerFromENS(
-  ensName: string,
-  provider: EnsProvider
+  ensNameOrOpts: string | ResolveSignerFromENSOptions,
+  providerArg?: EnsProvider
 ): Promise<EnsSignerRecord> {
+  let ensName: string;
+  let provider: EnsProvider;
+
+  if (typeof ensNameOrOpts === "string") {
+    if (!providerArg) {
+      throw new Error(
+        "resolveSignerFromENS: provider is required as the second argument "
+          + "when ensName is passed as a string."
+      );
+    }
+    ensName = ensNameOrOpts;
+    provider = providerArg;
+  } else {
+    ensName = ensNameOrOpts.ensName;
+    provider = ensNameOrOpts.provider;
+  }
+
+  if (!ensName || typeof ensName !== "string") {
+    throw new Error("resolveSignerFromENS: ensName must be a non-empty string.");
+  }
+
   let resolver: EnsResolver | null;
   try {
     resolver = await provider.getResolver(ensName);
@@ -75,8 +115,8 @@ export async function resolveSignerFromENS(
 
   if (!resolver) {
     throw new Error(
-      `No ENS resolver found for "${ensName}". ` +
-        `Verify the name is registered and has a resolver set.`
+      `No ENS resolver found for "${ensName}". `
+        + `Verify the name is registered and has a resolver set.`
     );
   }
 
@@ -101,16 +141,16 @@ export async function resolveSignerFromENS(
 
   if (!pubValue) {
     throw new Error(
-      `ENS name "${ensName}" has no ${ENS_KEY_PUB} text record. ` +
-        `Set cl.sig.pub = ed25519:<standard_base64_raw32> on the ENS name.`
+      `ENS name "${ensName}" has no ${ENS_KEY_PUB} text record. `
+        + `Set cl.sig.pub = ed25519:<standard_base64_raw32> on the ENS name.`
     );
   }
 
   // Validate canonical method if present
   if (canonicalValue && canonicalValue !== CANONICAL_METHOD) {
     throw new Error(
-      `ENS name "${ensName}" specifies unsupported canonical method: ` +
-        `"${canonicalValue}". Only "${CANONICAL_METHOD}" is supported.`
+      `ENS name "${ensName}" specifies unsupported canonical method: `
+        + `"${canonicalValue}". Only "${CANONICAL_METHOD}" is supported.`
     );
   }
 
@@ -130,9 +170,9 @@ export async function resolveSignerFromENS(
  * Use resolveSignerFromENS for full record access.
  */
 export async function resolvePublicKeyFromENS(
-  ensName: string,
-  provider: EnsProvider
+  ensNameOrOpts: string | ResolveSignerFromENSOptions,
+  providerArg?: EnsProvider
 ): Promise<Uint8Array> {
-  const record = await resolveSignerFromENS(ensName, provider);
+  const record = await resolveSignerFromENS(ensNameOrOpts as string, providerArg);
   return record.rawPublicKey;
 }

@@ -69,6 +69,16 @@ export function signReceiptEd25519Sha256(
   receipt: RuntimeReceipt,
   opts: SignReceiptCompatOptions
 ): SignedRuntimeReceipt {
+  if (!opts.privateKeyPem || typeof opts.privateKeyPem !== "string") {
+    throw new Error("signReceiptEd25519Sha256: privateKeyPem is required");
+  }
+  if (!opts.signer_id || typeof opts.signer_id !== "string") {
+    throw new Error("signReceiptEd25519Sha256: signer_id is required");
+  }
+  if (!opts.kid || typeof opts.kid !== "string") {
+    throw new Error("signReceiptEd25519Sha256: kid is required");
+  }
+
   // Strip any existing proof so it's not included in the signed payload
   const { metadata: meta = {}, ...rest } = receipt;
   const { proof: _proof, ...metaWithoutProof } = meta;
@@ -131,12 +141,22 @@ export function verifyReceiptEd25519Sha256(
 ): VerifyReceiptCompatResult {
   const checks = { signature_valid: false, hash_matches: false };
 
+  if (!opts.publicKeyPemOrDer || typeof opts.publicKeyPemOrDer !== "string") {
+    return { ok: false, checks, reason: "publicKeyPemOrDer is required" };
+  }
+
   const proof = receipt?.metadata?.proof;
   if (!proof) {
     return { ok: false, checks, reason: "Missing metadata.proof" };
   }
 
-  const sig = proof.signature || proof.signature_b64;
+  // Accept signature from either field; require non-empty string
+  const sig = (proof.signature && proof.signature.length > 0)
+    ? proof.signature
+    : (proof.signature_b64 && proof.signature_b64.length > 0)
+      ? proof.signature_b64
+      : null;
+
   if (!sig) {
     return { ok: false, checks, reason: "Missing proof.signature" };
   }

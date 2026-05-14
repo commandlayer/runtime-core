@@ -46,6 +46,7 @@ export {
   type EnsSignerRecord,
   type EnsProvider,
   type EnsResolver,
+  type ResolveSignerFromENSOptions,
 } from "./ens.js";
 
 // Receipt v1.1.0
