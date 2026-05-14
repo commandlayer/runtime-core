@@ -8,9 +8,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { generateEd25519KeyPair } from "../src/crypto.js";
-import { signReceipt, verifyReceipt, isSignedLayeredReceipt } from "../src/receipt.js";
+import { signReceipt, verifyReceipt, isSignedLayeredReceipt, type ReceiptPayload } from "../src/receipt.js";
 
-const makePayload = () => ({
+const makePayload = (): ReceiptPayload => ({
   verb: "verify",
   version: "1.1.0",
   agent: "runtime.commandlayer.eth",
@@ -42,13 +42,59 @@ describe("signReceipt", () => {
     assert.strictEqual(sigBytes.length, 64);
   });
 
+  it("preserves version field in signed receipt", () => {
+    const { privateKeyPem } = generateEd25519KeyPair();
+    const payload = makePayload();
+    payload.version = "1.1.0";
+    const receipt = signReceipt(payload, {
+      privateKeyPem,
+      kid: "kid1",
+      signerEns: "test.eth",
+    });
+    assert.strictEqual(receipt.receipt.version, "1.1.0");
+  });
+
   it("throws if verb is missing", () => {
     const { privateKeyPem } = generateEd25519KeyPair();
     assert.throws(
-      () => signReceipt({ version: "1.1.0", agent: "test.eth", timestamp: "2026-01-01T00:00:00Z" } as any, {
-        privateKeyPem, kid: "kid1", signerEns: "test.eth",
-      }),
+      () => signReceipt(
+        { version: "1.1.0", agent: "test.eth", timestamp: "2026-01-01T00:00:00Z", verb: "" } as ReceiptPayload,
+        { privateKeyPem, kid: "kid1", signerEns: "test.eth" }
+      ),
       /verb/
+    );
+  });
+
+  it("throws if version is missing", () => {
+    const { privateKeyPem } = generateEd25519KeyPair();
+    assert.throws(
+      () => signReceipt(
+        { verb: "test", agent: "test.eth", timestamp: "2026-01-01T00:00:00Z", version: "" } as ReceiptPayload,
+        { privateKeyPem, kid: "kid1", signerEns: "test.eth" }
+      ),
+      /version/
+    );
+  });
+
+  it("throws if agent is missing", () => {
+    const { privateKeyPem } = generateEd25519KeyPair();
+    assert.throws(
+      () => signReceipt(
+        { verb: "test", version: "1.1.0", timestamp: "2026-01-01T00:00:00Z", agent: "" } as ReceiptPayload,
+        { privateKeyPem, kid: "kid1", signerEns: "test.eth" }
+      ),
+      /agent/
+    );
+  });
+
+  it("throws if timestamp is missing", () => {
+    const { privateKeyPem } = generateEd25519KeyPair();
+    assert.throws(
+      () => signReceipt(
+        { verb: "test", version: "1.1.0", agent: "test.eth", timestamp: "" } as ReceiptPayload,
+        { privateKeyPem, kid: "kid1", signerEns: "test.eth" }
+      ),
+      /timestamp/
     );
   });
 });
@@ -122,8 +168,8 @@ describe("verifyReceipt — full round trip", () => {
     const signed = signReceipt(makePayload(), {
       privateKeyPem, kid: "kid1", signerEns: "test.eth",
     });
-    // Force wrong algorithm
-    (signed.signature.proof as any).alg = "rsa-pkcs1v15";
+    // Force wrong algorithm via unknown cast through Record
+    (signed.signature.proof as Record<string, unknown>).alg = "rsa-pkcs1v15";
 
     const result = verifyReceipt(signed, { rawPublicKey });
     assert.strictEqual(result.valid, false);
@@ -152,5 +198,13 @@ describe("isSignedLayeredReceipt", () => {
     assert.strictEqual(isSignedLayeredReceipt({ proof: { signature: "abc" } }), false);
     assert.strictEqual(isSignedLayeredReceipt(null), false);
     assert.strictEqual(isSignedLayeredReceipt("string"), false);
+  });
+
+  it("returns false when signature is empty string", () => {
+    const obj = {
+      receipt: { verb: "test", version: "1.1.0", agent: "x", timestamp: "t" },
+      signature: { proof: { alg: "ed25519", signature: "", signer_id: "x", kid: "k", canonical: "json.sorted_keys.v1" } },
+    };
+    assert.strictEqual(isSignedLayeredReceipt(obj), false);
   });
 });

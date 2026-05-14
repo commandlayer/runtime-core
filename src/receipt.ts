@@ -68,10 +68,29 @@ export function signReceipt(
   payload: ReceiptPayload,
   opts: SignReceiptOptions
 ): SignedLayeredReceipt {
-  // Validate required fields
-  if (!payload.verb) throw new Error("receipt.verb is required");
-  if (!payload.agent) throw new Error("receipt.agent is required");
-  if (!payload.timestamp) throw new Error("receipt.timestamp is required");
+  // Validate required fields — all four are mandated by ReceiptPayload
+  if (!payload.verb || typeof payload.verb !== "string") {
+    throw new Error("receipt.verb is required and must be a non-empty string");
+  }
+  if (!payload.version || typeof payload.version !== "string") {
+    throw new Error("receipt.version is required and must be a non-empty string");
+  }
+  if (!payload.agent || typeof payload.agent !== "string") {
+    throw new Error("receipt.agent is required and must be a non-empty string");
+  }
+  if (!payload.timestamp || typeof payload.timestamp !== "string") {
+    throw new Error("receipt.timestamp is required and must be a non-empty string");
+  }
+
+  if (!opts.privateKeyPem || typeof opts.privateKeyPem !== "string") {
+    throw new Error("signReceipt: privateKeyPem is required");
+  }
+  if (!opts.kid || typeof opts.kid !== "string") {
+    throw new Error("signReceipt: kid is required");
+  }
+  if (!opts.signerEns || typeof opts.signerEns !== "string") {
+    throw new Error("signReceipt: signerEns is required");
+  }
 
   const canonical = canonicalize(payload);
   const signature = signCanonical(canonical, opts.privateKeyPem);
@@ -140,11 +159,14 @@ export function verifyReceipt(
   };
 
   // Structure check
+  const proof = receipt?.signature?.proof;
   if (
-    !receipt?.receipt ||
-    !receipt?.signature?.proof?.signature ||
-    !receipt?.signature?.proof?.alg ||
-    !receipt?.signature?.proof?.signer_id
+    !receipt?.receipt
+    || !proof?.signature
+    || typeof proof.signature !== "string"
+    || proof.signature.length === 0
+    || !proof?.alg
+    || !proof?.signer_id
   ) {
     return {
       valid: false,
@@ -153,8 +175,6 @@ export function verifyReceipt(
     };
   }
   checks.structureValid = true;
-
-  const proof = receipt.signature.proof;
 
   // Algorithm check
   if (proof.alg !== SIGNATURE_ALG) {
@@ -212,11 +232,11 @@ export function verifyReceipt(
 
   // ALL checks must pass for valid: true
   const valid =
-    checks.structureValid &&
-    checks.algValid &&
-    checks.kidMatched &&
-    checks.signerMatched &&
-    checks.signatureValid;
+    checks.structureValid
+    && checks.algValid
+    && checks.kidMatched
+    && checks.signerMatched
+    && checks.signatureValid;
 
   return {
     valid,
@@ -244,9 +264,10 @@ export function isSignedLayeredReceipt(
   if (typeof sig.proof !== "object" || sig.proof === null) return false;
   const proof = sig.proof as Record<string, unknown>;
   return (
-    typeof proof.alg === "string" &&
-    typeof proof.signature === "string" &&
-    typeof proof.signer_id === "string"
+    typeof proof.alg === "string"
+    && typeof proof.signature === "string"
+    && proof.signature.length > 0
+    && typeof proof.signer_id === "string"
   );
 }
 
