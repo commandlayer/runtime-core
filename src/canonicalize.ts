@@ -153,8 +153,8 @@ export const CANONICAL_TEST_VECTORS = [
   },
   {
     description: "unicode string",
-    input: { msg: "hello \u4e16\u754c" },
-    expected: '{"msg":"hello \u4e16\u754c"}',
+    input: { msg: "hello 世界" },
+    expected: '{"msg":"hello 世界"}',
   },
   {
     description: "string with quotes and backslash",
@@ -172,5 +172,15 @@ export const CANONICAL_TEST_VECTORS = [
     },
     expected:
       '{"agent":"runtime.commandlayer.eth","payload":{"input":"test","result":"ok"},"timestamp":"2026-05-12T00:00:00.000Z","verb":"verify","version":"1.1.0"}',
+  },
+  {
+    // Mandatory audit test vector — protocol audit requires SHA-256 of this
+    // canonical form to be computed and tested (see test/canonicalize.test.ts).
+    // Input key insertion order is intentionally scrambled to verify sorting.
+    description: "audit protocol vector: verb/family/version",
+    input: { verb: "verify", family: "trust", version: "1.0.0" },
+    expected: '{"family":"trust","verb":"verify","version":"1.0.0"}',
+    // SHA-256 of the canonical string (UTF-8 encoded):
+    sha256: "3c3e2e6f63b02c1dc4d0dc0f6429bcef5fe27f11059c856218a52a4f43f90e44",
   },
 ] as const;
