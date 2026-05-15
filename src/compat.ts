@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { canonicalize } from "./canonicalize.js";
 import { signCanonical, verifyCanonical, CANONICAL_METHOD, SIGNATURE_ALG } from "./crypto.js";
 
+export interface EnsVerificationRecord {
+  signer: string;
+  kid: string;
+  canonical: string;
+}
+
 export interface CommandLayerReceipt {
   verb: string;
   version?: string;
@@ -57,7 +63,11 @@ export function signCommandLayerReceipt(
 
 export function verifyCommandLayerReceipt(
   receipt: CommandLayerReceipt,
-  opts: { publicKeyPemOrDer: string; allowedCanonicals?: string[] }
+  opts: {
+    publicKeyPemOrDer: string;
+    allowedCanonicals?: string[];
+    ensRecord?: EnsVerificationRecord;
+  }
 ): { ok: boolean; reason?: string } {
   const proof = receipt?.metadata?.proof;
   if (!proof) return { ok: false, reason: "Missing metadata.proof" };
@@ -65,6 +75,19 @@ export function verifyCommandLayerReceipt(
   if (!proof.hash?.value) return { ok: false, reason: "Missing metadata.proof.hash.value" };
   if (!proof.signature?.alg) return { ok: false, reason: "Missing metadata.proof.signature.alg" };
   if (!proof.signature?.value) return { ok: false, reason: "Missing metadata.proof.signature.value" };
+  if (!proof.signature?.kid) return { ok: false, reason: "Missing metadata.proof.signature.kid" };
+
+  if (opts.ensRecord) {
+    if (proof.signature.kid !== opts.ensRecord.kid) {
+      return { ok: false, reason: "metadata.proof.signature.kid does not match ENS cl.sig.kid" };
+    }
+    if (proof.canonicalization !== opts.ensRecord.canonical) {
+      return { ok: false, reason: "metadata.proof.canonicalization does not match ENS cl.sig.canonical" };
+    }
+    if (receipt.agent !== opts.ensRecord.signer) {
+      return { ok: false, reason: "receipt signer identity does not match ENS cl.receipt.signer" };
+    }
+  }
 
   const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD];
   if (!allowed.includes(proof.canonicalization)) return { ok: false, reason: "Unsupported canonicalization" };

@@ -52,6 +52,12 @@ function makeThrowingProvider(): EnsProvider {
 
 const RAW_KEY = new Uint8Array(32).fill(0xab);
 const PUB_VALUE = encodePublicKey(RAW_KEY);
+const RUNTIME_ENS_FIXTURE = {
+  "cl.sig.kid": "vC4WbcNoq2znSCiQ",
+  "cl.sig.pub": "ed25519:hhyCuPNoMk4JtEvGEV8F6nMZ4uDO1EcyizPufmnJTOY=",
+  "cl.sig.canonical": "json.sorted_keys.v1",
+  "cl.receipt.signer": "runtime.commandlayer.eth",
+} as const;
 
 const FULL_RECORDS: Record<string, string> = {
   "cl.sig.pub": PUB_VALUE,
@@ -62,6 +68,15 @@ const FULL_RECORDS: Record<string, string> = {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("resolveSignerFromENS — positional args", () => {
+  it("parses runtime.commandlayer.eth TXT record shape fixture", async () => {
+    const provider = makeMockProvider(RUNTIME_ENS_FIXTURE);
+    const record = await resolveSignerFromENS("runtime.commandlayer.eth", provider);
+
+    assert.strictEqual(record.kid, "vC4WbcNoq2znSCiQ");
+    assert.strictEqual(record.canonical, "json.sorted_keys.v1");
+    assert.strictEqual(record.rawPublicKey.length, 32);
+  });
+
   it("resolves a full signer record", async () => {
     const provider = makeMockProvider(FULL_RECORDS);
     const record = await resolveSignerFromENS("test.commandlayer.eth", provider);

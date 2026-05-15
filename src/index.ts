@@ -70,4 +70,5 @@ export {
   isSignedCommandLayerReceipt,
   type CommandLayerReceipt,
   type CommandLayerProof,
+  type EnsVerificationRecord,
 } from "./compat.js";
