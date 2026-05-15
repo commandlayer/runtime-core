@@ -8,6 +8,18 @@ export interface EnsVerificationRecord {
   canonical: string;
 }
 
+export interface VerifyCommandLayerReceiptResult {
+  ok: boolean;
+  status: "VERIFIED" | "INVALID";
+  checks: {
+    schema: boolean;
+    canonical_hash: boolean;
+    signature: boolean;
+    signer: boolean;
+  };
+  errors: string[];
+}
+
 export interface CommandLayerReceipt {
   verb: string;
   version?: string;
@@ -22,7 +34,7 @@ export interface CommandLayerReceipt {
 
 export interface CommandLayerProof {
   canonicalization: string;
-  hash: { alg: "sha256"; value: string };
+  hash: { alg: "SHA-256"; value: string };
   signature: { alg: typeof SIGNATURE_ALG; value: string; kid: string };
 }
 
@@ -39,7 +51,7 @@ export function signCommandLayerReceipt(
   opts: { privateKeyPem: string; kid: string }
 ): CommandLayerReceipt {
   if (!opts.privateKeyPem) throw new Error("privateKeyPem is required");
-  if (!opts.kid) throw new Error("kid is required");
+  if (!opts.kid || typeof opts.kid !== "string") throw new Error("kid is required");
 
   const canonical = buildCanonicalProof(receipt);
   const hash = createHash("sha256").update(canonical, "utf8").digest("hex");
@@ -54,7 +66,7 @@ export function signCommandLayerReceipt(
       ...metaWithoutProof,
       proof: {
         canonicalization: CANONICAL_METHOD,
-        hash: { alg: "sha256", value: hash },
+        hash: { alg: "SHA-256", value: hash },
         signature: { alg: SIGNATURE_ALG, value: sig, kid: opts.kid },
       },
     },
@@ -68,38 +80,94 @@ export function verifyCommandLayerReceipt(
     allowedCanonicals?: string[];
     ensRecord?: EnsVerificationRecord;
   }
-): { ok: boolean; reason?: string } {
-  const proof = receipt?.metadata?.proof;
-  if (!proof) return { ok: false, reason: "Missing metadata.proof" };
-  if (!proof.hash?.alg) return { ok: false, reason: "Missing metadata.proof.hash.alg" };
-  if (!proof.hash?.value) return { ok: false, reason: "Missing metadata.proof.hash.value" };
-  if (!proof.signature?.alg) return { ok: false, reason: "Missing metadata.proof.signature.alg" };
-  if (!proof.signature?.value) return { ok: false, reason: "Missing metadata.proof.signature.value" };
-  if (!proof.signature?.kid) return { ok: false, reason: "Missing metadata.proof.signature.kid" };
+): VerifyCommandLayerReceiptResult {
+  const checks: VerifyCommandLayerReceiptResult["checks"] = {
+    schema: false,
+    canonical_hash: false,
+    signature: false,
+    signer: opts.ensRecord ? false : true,
+  };
+  const errors: string[] = [];
 
-  if (opts.ensRecord) {
-    if (proof.signature.kid !== opts.ensRecord.kid) {
-      return { ok: false, reason: "metadata.proof.signature.kid does not match ENS cl.sig.kid" };
-    }
-    if (proof.canonicalization !== opts.ensRecord.canonical) {
-      return { ok: false, reason: "metadata.proof.canonicalization does not match ENS cl.sig.canonical" };
-    }
-    if (receipt.agent !== opts.ensRecord.signer) {
-      return { ok: false, reason: "receipt signer identity does not match ENS cl.receipt.signer" };
-    }
+  const proof = receipt?.metadata?.proof;
+  if (!proof || typeof proof !== "object") {
+    errors.push("ERR_MISSING_PROOF");
+    return { ok: false, status: "INVALID", checks, errors };
+  }
+
+  if (typeof proof.canonicalization !== "string" || proof.canonicalization.length === 0) {
+    errors.push("ERR_MISSING_CANONICALIZATION");
+  }
+  if (typeof proof.hash?.alg !== "string" || proof.hash.alg.length === 0) {
+    errors.push("ERR_MISSING_HASH_ALG");
+  }
+  if (typeof proof.hash?.value !== "string" || proof.hash.value.length === 0) {
+    errors.push("ERR_MISSING_HASH_VALUE");
+  }
+  if (typeof proof.signature?.alg !== "string" || proof.signature.alg.length === 0) {
+    errors.push("ERR_MISSING_SIGNATURE_ALG");
+  }
+  if (typeof proof.signature?.value !== "string" || proof.signature.value.length === 0) {
+    errors.push("ERR_MISSING_SIGNATURE_VALUE");
+  }
+  if (typeof proof.signature?.kid !== "string" || proof.signature.kid.trim().length === 0) {
+    errors.push("ERR_MISSING_SIGNATURE_KID");
   }
 
   const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD];
-  if (!allowed.includes(proof.canonicalization)) return { ok: false, reason: "Unsupported canonicalization" };
-  if (proof.hash.alg !== "sha256") return { ok: false, reason: "Unsupported hash algorithm" };
-  if (proof.signature.alg !== SIGNATURE_ALG) return { ok: false, reason: "Unsupported signature algorithm" };
+  if (typeof proof.canonicalization === "string" && !allowed.includes(proof.canonicalization)) {
+    errors.push("ERR_UNSUPPORTED_CANONICALIZATION");
+  }
+  if (proof.hash?.alg && proof.hash.alg !== "SHA-256") {
+    errors.push("ERR_UNSUPPORTED_HASH_ALG");
+  }
+  if (proof.signature?.alg && proof.signature.alg !== SIGNATURE_ALG) {
+    errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
+  }
 
-  const canonical = buildCanonicalProof(receipt);
-  const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
-  if (recomputed !== proof.hash.value) return { ok: false, reason: "Hash mismatch" };
+  if (opts.ensRecord) {
+    if (proof.signature?.kid !== opts.ensRecord.kid) {
+      errors.push("ERR_ENS_KID_MISMATCH");
+    }
+    if (proof.canonicalization !== opts.ensRecord.canonical) {
+      errors.push("ERR_ENS_CANONICAL_MISMATCH");
+    }
+    if (receipt.agent !== opts.ensRecord.signer) {
+      errors.push("ERR_ENS_SIGNER_MISMATCH");
+    }
+  }
 
-  const ok = verifyCanonical(canonical, proof.signature.value, opts.publicKeyPemOrDer);
-  return ok ? { ok: true } : { ok: false, reason: "signature invalid" };
+  checks.schema = errors.length === 0;
+
+  let canonical = "";
+  if (checks.schema) {
+    canonical = buildCanonicalProof(receipt);
+    const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
+    if (recomputed === proof.hash.value) {
+      checks.canonical_hash = true;
+    } else {
+      errors.push("ERR_HASH_MISMATCH");
+    }
+
+    const sigOk = verifyCanonical(canonical, proof.signature.value, opts.publicKeyPemOrDer);
+    if (sigOk) {
+      checks.signature = true;
+    } else {
+      errors.push("ERR_SIGNATURE_INVALID");
+    }
+  }
+
+  if (opts.ensRecord) {
+    checks.signer = !errors.some((e) => e.startsWith("ERR_ENS_"));
+  }
+
+  const ok = checks.schema && checks.canonical_hash && checks.signature && checks.signer;
+  return {
+    ok,
+    status: ok ? "VERIFIED" : "INVALID",
+    checks,
+    errors,
+  };
 }
 
 export function isSignedCommandLayerReceipt(value: unknown): value is CommandLayerReceipt {
@@ -107,5 +175,6 @@ export function isSignedCommandLayerReceipt(value: unknown): value is CommandLay
   return !!v?.metadata?.proof?.hash?.alg
     && !!v?.metadata?.proof?.hash?.value
     && !!v?.metadata?.proof?.signature?.alg
-    && !!v?.metadata?.proof?.signature?.value;
+    && !!v?.metadata?.proof?.signature?.value
+    && !!v?.metadata?.proof?.signature?.kid;
 }

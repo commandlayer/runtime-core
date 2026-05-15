@@ -49,19 +49,6 @@ export {
   type ResolveSignerFromENSOptions,
 } from "./ens.js";
 
-// Receipt v1.1.0
-export {
-  signReceipt,
-  verifyReceipt,
-  isSignedLayeredReceipt,
-  type ReceiptPayload,
-  type ReceiptProof,
-  type SignedLayeredReceipt,
-  type SignReceiptOptions,
-  type VerifyReceiptResult,
-  type VerifyReceiptOptions,
-} from "./receipt.js";
-
 // CommandLayer canonical proof envelope APIs
 export {
   buildCanonicalProof,

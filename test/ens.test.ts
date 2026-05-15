@@ -63,6 +63,12 @@ const FULL_RECORDS: Record<string, string> = {
   "cl.sig.pub": PUB_VALUE,
   "cl.sig.kid": "testKid001",
   "cl.sig.canonical": "json.sorted_keys.v1",
+  "cl.receipt.signer": "test.commandlayer.eth",
+  "cl.endpoint.runtime": "https://runtime.commandlayer.io",
+  "cl.endpoint.verify": "https://verify.commandlayer.io",
+  "cl.endpoint.mcp": "https://mcp.commandlayer.io",
+  "cl.endpoint.docs": "https://docs.commandlayer.io",
+  "cl.endpoint.registry": "https://registry.commandlayer.io",
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -75,6 +81,7 @@ describe("resolveSignerFromENS — positional args", () => {
     assert.strictEqual(record.kid, "vC4WbcNoq2znSCiQ");
     assert.strictEqual(record.canonical, "json.sorted_keys.v1");
     assert.strictEqual(record.rawPublicKey.length, 32);
+    assert.strictEqual(record.signer, "runtime.commandlayer.eth");
   });
 
   it("resolves a full signer record", async () => {
@@ -85,18 +92,27 @@ describe("resolveSignerFromENS — positional args", () => {
     assert.deepStrictEqual(record.rawPublicKey, RAW_KEY);
     assert.strictEqual(record.kid, "testKid001");
     assert.strictEqual(record.canonical, "json.sorted_keys.v1");
+    assert.strictEqual(record.signer, "test.commandlayer.eth");
+    assert.strictEqual(record.endpoints.runtime, "https://runtime.commandlayer.io");
+    assert.strictEqual(record.endpoints.verify, "https://verify.commandlayer.io");
+    assert.strictEqual(record.endpoints.mcp, "https://mcp.commandlayer.io");
+    assert.strictEqual(record.endpoints.docs, "https://docs.commandlayer.io");
+    assert.strictEqual(record.endpoints.registry, "https://registry.commandlayer.io");
   });
 
   it("defaults kid to empty string when cl.sig.kid is absent", async () => {
     const provider = makeMockProvider({ "cl.sig.pub": PUB_VALUE });
     const record = await resolveSignerFromENS("test.commandlayer.eth", provider);
     assert.strictEqual(record.kid, "");
+    assert.strictEqual(record.signer, "test.commandlayer.eth");
+    assert.deepStrictEqual(record.endpoints, {});
   });
 
   it("defaults canonical to json.sorted_keys.v1 when absent", async () => {
     const provider = makeMockProvider({ "cl.sig.pub": PUB_VALUE });
     const record = await resolveSignerFromENS("test.commandlayer.eth", provider);
     assert.strictEqual(record.canonical, "json.sorted_keys.v1");
+    assert.strictEqual(record.signer, "test.commandlayer.eth");
   });
 
   it("throws when no resolver found", async () => {
