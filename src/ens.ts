@@ -26,6 +26,14 @@ export { ENS_KEY_SIGNER } from "./crypto.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface EnsEndpointMetadata {
+  runtime?: string;
+  verify?: string;
+  mcp?: string;
+  docs?: string;
+  registry?: string;
+}
+
 export interface EnsSignerRecord {
   /** ENS name, e.g. runtime.commandlayer.eth */
   name: string;
@@ -35,6 +43,10 @@ export interface EnsSignerRecord {
   kid: string;
   /** Canonicalization method from cl.sig.canonical */
   canonical: string;
+  /** Receipt signer identity from cl.receipt.signer */
+  signer: string;
+  /** Optional endpoint discovery metadata */
+  endpoints: EnsEndpointMetadata;
 }
 
 /**
@@ -127,12 +139,24 @@ export async function resolveSignerFromENS(
   let pubValue: string | null;
   let kidValue: string | null;
   let canonicalValue: string | null;
+  let signerValue: string | null;
+  let endpointRuntime: string | null;
+  let endpointVerify: string | null;
+  let endpointMcp: string | null;
+  let endpointDocs: string | null;
+  let endpointRegistry: string | null;
 
   try {
-    [pubValue, kidValue, canonicalValue] = await Promise.all([
+    [pubValue, kidValue, canonicalValue, signerValue, endpointRuntime, endpointVerify, endpointMcp, endpointDocs, endpointRegistry] = await Promise.all([
       resolver.getText(ENS_KEY_PUB),
       resolver.getText(ENS_KEY_KID),
       resolver.getText(ENS_KEY_CANONICAL),
+      resolver.getText("cl.receipt.signer"),
+      resolver.getText("cl.endpoint.runtime"),
+      resolver.getText("cl.endpoint.verify"),
+      resolver.getText("cl.endpoint.mcp"),
+      resolver.getText("cl.endpoint.docs"),
+      resolver.getText("cl.endpoint.registry"),
     ]);
   } catch (err) {
     throw new Error(
@@ -165,6 +189,14 @@ export async function resolveSignerFromENS(
     rawPublicKey,
     kid: kidValue ?? "",
     canonical: canonicalValue ?? CANONICAL_METHOD,
+    signer: signerValue ?? ensName,
+    endpoints: {
+      ...(endpointRuntime ? { runtime: endpointRuntime } : {}),
+      ...(endpointVerify ? { verify: endpointVerify } : {}),
+      ...(endpointMcp ? { mcp: endpointMcp } : {}),
+      ...(endpointDocs ? { docs: endpointDocs } : {}),
+      ...(endpointRegistry ? { registry: endpointRegistry } : {}),
+    },
   };
 }
 

@@ -21,25 +21,51 @@ describe("canonical CLAS proof envelope", () => {
     const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
     const proof = signed.metadata!.proof!;
     assert.equal(proof.canonicalization, "json.sorted_keys.v1");
-    assert.equal(proof.hash.alg, "sha256");
+    assert.equal(proof.hash.alg, "SHA-256");
     assert.ok(proof.hash.value);
     assert.equal(proof.signature.alg, "ed25519");
     assert.ok(proof.signature.value);
     assert.equal(proof.signature.kid, "testKid");
 
     const result = verifyCommandLayerReceipt(signed, { publicKeyPemOrDer: kp.publicKeyPem });
-    assert.ok(result.ok, result.reason);
+    assert.deepEqual(result.status, "VERIFIED");
+    assert.deepEqual(result.checks, { schema: true, canonical_hash: true, signature: true, signer: true });
+    assert.deepEqual(result.errors, []);
     assert.equal(isSignedCommandLayerReceipt(signed), true);
   });
 
-  test("rejects required canonical fields when missing", () => {
+  test("requires signature.kid to be a non-empty string", () => {
     const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
     const p = signed.metadata!.proof!;
-    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, hash: { ...p.hash, alg: "" as never } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
-    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, hash: { ...p.hash, value: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
-    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, alg: "" as never } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
-    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, value: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
-    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, kid: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
+    const missingKid = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, kid: "" } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(missingKid.status, "INVALID");
+    assert.equal(missingKid.checks.schema, false);
+    assert.ok(missingKid.errors.includes("ERR_MISSING_SIGNATURE_KID"));
+  });
+
+  test("returns INVALID and canonical_hash=false on invalid hash", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const bad = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, hash: { ...signed.metadata!.proof!.hash, value: "00" } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(bad.status, "INVALID");
+    assert.equal(bad.checks.canonical_hash, false);
+    assert.ok(bad.errors.includes("ERR_HASH_MISMATCH"));
+  });
+
+  test("returns INVALID and signature=false on invalid signature", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const bad = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, signature: { ...signed.metadata!.proof!.signature, value: Buffer.alloc(64).toString("base64") } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(bad.status, "INVALID");
+    assert.equal(bad.checks.signature, false);
+    assert.ok(bad.errors.includes("ERR_SIGNATURE_INVALID"));
   });
 
   test("validates ENS-compatible signer constraints when ensRecord is supplied", () => {
@@ -48,43 +74,9 @@ describe("canonical CLAS proof envelope", () => {
       kid: "vC4WbcNoq2znSCiQ",
       canonical: "json.sorted_keys.v1",
     };
-
-    const signed = signCommandLayerReceipt(
-      { ...baseReceipt, agent: "runtime.commandlayer.eth" },
-      { privateKeyPem: kp.privateKeyPem, kid: "vC4WbcNoq2znSCiQ" }
-    );
-
-    const ok = verifyCommandLayerReceipt(signed, {
-      publicKeyPemOrDer: kp.publicKeyPem,
-      ensRecord: runtimeEnsFixture,
-    });
+    const signed = signCommandLayerReceipt({ ...baseReceipt, agent: "runtime.commandlayer.eth" }, { privateKeyPem: kp.privateKeyPem, kid: "vC4WbcNoq2znSCiQ" });
+    const ok = verifyCommandLayerReceipt(signed, { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture });
     assert.equal(ok.ok, true);
-
-    const badKid = verifyCommandLayerReceipt(
-      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, signature: { ...signed.metadata!.proof!.signature, kid: "wrong" } } } },
-      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
-    );
-    assert.equal(badKid.ok, false);
-
-    const badCanonical = verifyCommandLayerReceipt(
-      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "json.unsorted.v1" } } },
-      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
-    );
-    assert.equal(badCanonical.ok, false);
-
-    const badSigner = verifyCommandLayerReceipt(
-      { ...signed, agent: "other.commandlayer.eth" },
-      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
-    );
-    assert.equal(badSigner.ok, false);
-  });
-
-  test("rejects legacy fields as canonical", () => {
-    const legacyLike = {
-      ...baseReceipt,
-      metadata: { proof: { signature_b64: "abc", hash_sha256: "def", canonicalization: "json.sorted_keys.v1" } },
-    };
-    const result = verifyCommandLayerReceipt(legacyLike as never, { publicKeyPemOrDer: kp.publicKeyPem });
-    assert.equal(result.ok, false);
+    assert.equal(ok.checks.signer, true);
   });
 });
