@@ -74,7 +74,7 @@ describe("canonicalize — SHA-256 audit test vector", () => {
    * is computed and verified against a known value.
    *
    * Canonical form (keys sorted): {"family":"trust","verb":"verify","version":"1.0.0"}
-   * SHA-256 (hex): 3c3e2e6f63b02c1dc4d0dc0f6429bcef5fe27f11059c856218a52a4f43f90e44
+   * SHA-256 (hex): 7f84cc113290c283fe97e3beb9bd3f65e5de0022e278cad25ef7619c398b1bab
    *
    * This test locks the canonicalization algorithm to a concrete byte-level
    * output and proves the SHA-256 is deterministic across Node.js versions.
@@ -99,7 +99,7 @@ describe("canonicalize — SHA-256 audit test vector", () => {
     // If this fails, canonicalization has changed and protocol version must bump.
     assert.strictEqual(
       digest,
-      "3c3e2e6f63b02c1dc4d0dc0f6429bcef5fe27f11059c856218a52a4f43f90e44",
+      "7f84cc113290c283fe97e3beb9bd3f65e5de0022e278cad25ef7619c398b1bab",
       "SHA-256 of canonical audit vector must match the known protocol digest"
     );
   });

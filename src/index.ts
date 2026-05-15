@@ -62,15 +62,12 @@ export {
   type VerifyReceiptOptions,
 } from "./receipt.js";
 
-// Backward-compatibility shims (for runtime/server.mjs)
+// CommandLayer canonical proof envelope APIs
 export {
-  CANONICAL_ID_SORTED_KEYS_V1,
-  signReceiptEd25519Sha256,
-  verifyReceiptEd25519Sha256,
-  type RuntimeReceipt,
-  type RuntimeProof,
-  type SignReceiptCompatOptions,
-  type SignedRuntimeReceipt,
-  type VerifyReceiptCompatOptions,
-  type VerifyReceiptCompatResult,
+  buildCanonicalProof,
+  signCommandLayerReceipt,
+  verifyCommandLayerReceipt,
+  isSignedCommandLayerReceipt,
+  type CommandLayerReceipt,
+  type CommandLayerProof,
 } from "./compat.js";

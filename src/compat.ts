@@ -1,221 +1,88 @@
-/**
- * @commandlayer/runtime-core — compat.ts
- *
- * Backward-compatibility shims for runtime/server.mjs.
- * These adapters translate between the runtime's envelope format
- * (receipt with metadata.proof) and the core v1.1.0 APIs.
- *
- * The signing protocol is ALWAYS Ed25519(UTF8(canonical)) — raw bytes.
- * The "sha256" in function names is a legacy artifact; these functions
- * produce v1.1.0-compliant signatures.
- */
-
 import { createHash } from "node:crypto";
 import { canonicalize } from "./canonicalize.js";
-import { signCanonical, verifyCanonical, CANONICAL_METHOD } from "./crypto.js";
+import { signCanonical, verifyCanonical, CANONICAL_METHOD, SIGNATURE_ALG } from "./crypto.js";
 
-/** Canonical method identifier constant for import by downstream repos. */
-export const CANONICAL_ID_SORTED_KEYS_V1 = CANONICAL_METHOD;
-
-// ── Runtime receipt shape (envelope format used by runtime/server.mjs) ────────
-
-export interface RuntimeReceipt {
+export interface CommandLayerReceipt {
   verb: string;
   version?: string;
   agent?: string;
   timestamp?: string;
   metadata?: {
-    proof?: RuntimeProof;
+    proof?: CommandLayerProof;
     [key: string]: unknown;
   };
   [key: string]: unknown;
 }
 
-export interface RuntimeProof {
-  alg: string;
-  kid: string;
-  signer_id: string;
-  canonical: string;
-  hash_sha256?: string;
-  signature?: string;
-  signature_b64?: string;
+export interface CommandLayerProof {
+  canonicalization: string;
+  hash: { alg: "sha256"; value: string };
+  signature: { alg: typeof SIGNATURE_ALG; value: string; kid: string };
 }
 
-// ── Sign ──────────────────────────────────────────────────────────────────────
-
-export interface SignReceiptCompatOptions {
-  signer_id: string;
-  kid: string;
-  canonical_id?: string;
-  privateKeyPem: string;
-}
-
-export interface SignedRuntimeReceipt extends RuntimeReceipt {
-  metadata: {
-    proof: RuntimeProof;
-    [key: string]: unknown;
-  };
-}
-
-/**
- * Sign a runtime-style receipt and embed the proof in metadata.proof.
- *
- * Signing message: Ed25519(UTF8(canonicalize(receipt_without_proof)))
- * The proof block is NOT included in the signed payload.
- *
- * Returns the receipt with metadata.proof populated.
- */
-export function signReceiptEd25519Sha256(
-  receipt: RuntimeReceipt,
-  opts: SignReceiptCompatOptions
-): SignedRuntimeReceipt {
-  if (!opts.privateKeyPem || typeof opts.privateKeyPem !== "string") {
-    throw new Error("signReceiptEd25519Sha256: privateKeyPem is required");
-  }
-  if (!opts.signer_id || typeof opts.signer_id !== "string") {
-    throw new Error("signReceiptEd25519Sha256: signer_id is required");
-  }
-  if (!opts.kid || typeof opts.kid !== "string") {
-    throw new Error("signReceiptEd25519Sha256: kid is required");
-  }
-
-  // Strip any existing proof so it's not included in the signed payload
+export function buildCanonicalProof(receipt: CommandLayerReceipt): string {
   const { metadata: meta = {}, ...rest } = receipt;
   const { proof: _proof, ...metaWithoutProof } = meta;
+  const payload: Record<string, unknown> = { ...rest, metadata: metaWithoutProof };
+  if (Object.keys(metaWithoutProof).length === 0) delete payload.metadata;
+  return canonicalize(payload);
+}
 
-  const payloadToSign: Record<string, unknown> = { ...rest, metadata: metaWithoutProof };
-  if (Object.keys(metaWithoutProof).length === 0) {
-    delete payloadToSign.metadata;
-  }
+export function signCommandLayerReceipt(
+  receipt: CommandLayerReceipt,
+  opts: { privateKeyPem: string; kid: string }
+): CommandLayerReceipt {
+  if (!opts.privateKeyPem) throw new Error("privateKeyPem is required");
+  if (!opts.kid) throw new Error("kid is required");
 
-  const canonical = canonicalize(payloadToSign);
-  const sha256Hex = createHash("sha256").update(canonical, "utf8").digest("hex");
-  const signature = signCanonical(canonical, opts.privateKeyPem);
+  const canonical = buildCanonicalProof(receipt);
+  const hash = createHash("sha256").update(canonical, "utf8").digest("hex");
+  const sig = signCanonical(canonical, opts.privateKeyPem);
 
-  const proof: RuntimeProof = {
-    alg: "ed25519",
-    kid: opts.kid,
-    signer_id: opts.signer_id,
-    canonical: opts.canonical_id ?? CANONICAL_METHOD,
-    hash_sha256: sha256Hex,
-    signature_b64: signature,
-    signature,
-  };
+  const { metadata: meta = {}, ...rest } = receipt;
+  const { proof: _proof, ...metaWithoutProof } = meta;
 
   return {
     ...rest,
     metadata: {
       ...metaWithoutProof,
-      proof,
+      proof: {
+        canonicalization: CANONICAL_METHOD,
+        hash: { alg: "sha256", value: hash },
+        signature: { alg: SIGNATURE_ALG, value: sig, kid: opts.kid },
+      },
     },
-  } as SignedRuntimeReceipt;
-}
-
-// ── Verify ────────────────────────────────────────────────────────────────────
-
-export interface VerifyReceiptCompatOptions {
-  publicKeyPemOrDer: string;
-  allowedCanonicals?: string[];
-}
-
-export interface VerifyReceiptCompatResult {
-  ok: boolean;
-  checks: {
-    signature_valid: boolean;
-    hash_matches: boolean;
   };
-  reason?: string;
 }
 
-/**
- * Verify a runtime-style receipt (with metadata.proof).
- *
- * Reconstructs the signed payload by stripping metadata.proof,
- * then verifies the Ed25519 signature over the canonical bytes.
- *
- * Also recomputes sha256 and checks hash_sha256 if present (legacy compat).
- */
-export function verifyReceiptEd25519Sha256(
-  receipt: RuntimeReceipt,
-  opts: VerifyReceiptCompatOptions
-): VerifyReceiptCompatResult {
-  const checks = { signature_valid: false, hash_matches: false };
-
-  if (!opts.publicKeyPemOrDer || typeof opts.publicKeyPemOrDer !== "string") {
-    return { ok: false, checks, reason: "publicKeyPemOrDer is required" };
-  }
-
+export function verifyCommandLayerReceipt(
+  receipt: CommandLayerReceipt,
+  opts: { publicKeyPemOrDer: string; allowedCanonicals?: string[] }
+): { ok: boolean; reason?: string } {
   const proof = receipt?.metadata?.proof;
-  if (!proof) {
-    return { ok: false, checks, reason: "Missing metadata.proof" };
-  }
+  if (!proof) return { ok: false, reason: "Missing metadata.proof" };
+  if (!proof.hash?.alg) return { ok: false, reason: "Missing metadata.proof.hash.alg" };
+  if (!proof.hash?.value) return { ok: false, reason: "Missing metadata.proof.hash.value" };
+  if (!proof.signature?.alg) return { ok: false, reason: "Missing metadata.proof.signature.alg" };
+  if (!proof.signature?.value) return { ok: false, reason: "Missing metadata.proof.signature.value" };
 
-  // Accept signature from either field; require non-empty string
-  const sig = (proof.signature && proof.signature.length > 0)
-    ? proof.signature
-    : (proof.signature_b64 && proof.signature_b64.length > 0)
-      ? proof.signature_b64
-      : null;
+  const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD];
+  if (!allowed.includes(proof.canonicalization)) return { ok: false, reason: "Unsupported canonicalization" };
+  if (proof.hash.alg !== "sha256") return { ok: false, reason: "Unsupported hash algorithm" };
+  if (proof.signature.alg !== SIGNATURE_ALG) return { ok: false, reason: "Unsupported signature algorithm" };
 
-  if (!sig) {
-    return { ok: false, checks, reason: "Missing proof.signature" };
-  }
+  const canonical = buildCanonicalProof(receipt);
+  const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
+  if (recomputed !== proof.hash.value) return { ok: false, reason: "Hash mismatch" };
 
-  const allowedCanonicals = opts.allowedCanonicals ?? [CANONICAL_METHOD];
-  if (!allowedCanonicals.includes(proof.canonical)) {
-    return {
-      ok: false,
-      checks,
-      reason: `Unsupported canonicalization method: ${proof.canonical}`,
-    };
-  }
+  const ok = verifyCanonical(canonical, proof.signature.value, opts.publicKeyPemOrDer);
+  return ok ? { ok: true } : { ok: false, reason: "signature invalid" };
+}
 
-  // Reconstruct the signed payload (receipt without the proof block)
-  const { metadata: meta = {}, ...rest } = receipt;
-  const { proof: _proof, ...metaWithoutProof } = meta;
-
-  const payloadToVerify: Record<string, unknown> = { ...rest, metadata: metaWithoutProof };
-  if (Object.keys(metaWithoutProof).length === 0) {
-    delete payloadToVerify.metadata;
-  }
-
-  let canonical: string;
-  try {
-    canonical = canonicalize(payloadToVerify);
-  } catch (err) {
-    return {
-      ok: false,
-      checks,
-      reason: `Canonicalization failed: ${(err as Error).message}`,
-    };
-  }
-
-  // Verify sha256 hash if present (legacy field, not required for v1.1.0)
-  if (proof.hash_sha256) {
-    const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
-    checks.hash_matches = recomputed === proof.hash_sha256;
-  } else {
-    checks.hash_matches = true;
-  }
-
-  // Verify signature over raw canonical bytes (v1.1.0 protocol)
-  try {
-    checks.signature_valid = verifyCanonical(canonical, sig, opts.publicKeyPemOrDer);
-  } catch {
-    return { ok: false, checks, reason: "Signature verification threw an error" };
-  }
-
-  const ok = checks.signature_valid && checks.hash_matches;
-  return {
-    ok,
-    checks,
-    reason: ok
-      ? undefined
-      : [
-          !checks.signature_valid ? "signature invalid" : null,
-          !checks.hash_matches ? "hash mismatch" : null,
-        ]
-          .filter(Boolean)
-          .join(", "),
-  };
+export function isSignedCommandLayerReceipt(value: unknown): value is CommandLayerReceipt {
+  const v = value as CommandLayerReceipt;
+  return !!v?.metadata?.proof?.hash?.alg
+    && !!v?.metadata?.proof?.hash?.value
+    && !!v?.metadata?.proof?.signature?.alg
+    && !!v?.metadata?.proof?.signature?.value;
 }
