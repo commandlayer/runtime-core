@@ -39,6 +39,44 @@ describe("canonical CLAS proof envelope", () => {
     assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, hash: { ...p.hash, value: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
     assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, alg: "" as never } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
     assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, value: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
+    assert.equal(verifyCommandLayerReceipt({ ...signed, metadata: { ...signed.metadata!, proof: { ...p, signature: { ...p.signature, kid: "" } } } }, { publicKeyPemOrDer: kp.publicKeyPem }).ok, false);
+  });
+
+  test("validates ENS-compatible signer constraints when ensRecord is supplied", () => {
+    const runtimeEnsFixture = {
+      signer: "runtime.commandlayer.eth",
+      kid: "vC4WbcNoq2znSCiQ",
+      canonical: "json.sorted_keys.v1",
+    };
+
+    const signed = signCommandLayerReceipt(
+      { ...baseReceipt, agent: "runtime.commandlayer.eth" },
+      { privateKeyPem: kp.privateKeyPem, kid: "vC4WbcNoq2znSCiQ" }
+    );
+
+    const ok = verifyCommandLayerReceipt(signed, {
+      publicKeyPemOrDer: kp.publicKeyPem,
+      ensRecord: runtimeEnsFixture,
+    });
+    assert.equal(ok.ok, true);
+
+    const badKid = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, signature: { ...signed.metadata!.proof!.signature, kid: "wrong" } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
+    );
+    assert.equal(badKid.ok, false);
+
+    const badCanonical = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "json.unsorted.v1" } } },
+      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
+    );
+    assert.equal(badCanonical.ok, false);
+
+    const badSigner = verifyCommandLayerReceipt(
+      { ...signed, agent: "other.commandlayer.eth" },
+      { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture }
+    );
+    assert.equal(badSigner.ok, false);
   });
 
   test("rejects legacy fields as canonical", () => {
