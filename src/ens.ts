@@ -98,6 +98,9 @@ export async function resolveSignerFromENS(
   } else {
     ensName = ensNameOrOpts.ensName;
     provider = ensNameOrOpts.provider;
+    if (!provider) {
+      throw new Error("resolveSignerFromENS: provider is required in options object.");
+    }
   }
 
   if (!ensName || typeof ensName !== "string") {

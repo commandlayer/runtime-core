@@ -126,18 +126,26 @@ const valid = verifyCanonical(canonical, signature, publicKeyPem);
 const validFromRaw = verifyCanonicalWithRawKey(canonical, signature, rawPublicKey);
 ```
 
-### Legacy compat shims (runtime/server.mjs bridge)
+### Canonical CLAS proof envelope
 
-If you need the older `metadata.proof` envelope format, import the compat helpers directly:
+Use the canonical metadata proof API:
 
 ```ts
 import {
-  signReceiptEd25519Sha256,
-  verifyReceiptEd25519Sha256,
+  signCommandLayerReceipt,
+  verifyCommandLayerReceipt,
+  buildCanonicalProof,
+  isSignedCommandLayerReceipt,
 } from '@commandlayer/runtime-core';
 ```
 
-These are explicitly legacy APIs. New integrations should use `signReceipt` / `verifyReceipt`.
+Canonical envelope fields:
+- `metadata.proof.canonicalization`
+- `metadata.proof.hash.alg`
+- `metadata.proof.hash.value`
+- `metadata.proof.signature.alg`
+- `metadata.proof.signature.value`
+- `metadata.proof.signature.kid`
 
 ### Cross-repo canonicalization alignment
 

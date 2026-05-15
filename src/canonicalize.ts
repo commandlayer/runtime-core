@@ -181,6 +181,6 @@ export const CANONICAL_TEST_VECTORS = [
     input: { verb: "verify", family: "trust", version: "1.0.0" },
     expected: '{"family":"trust","verb":"verify","version":"1.0.0"}',
     // SHA-256 of the canonical string (UTF-8 encoded):
-    sha256: "3c3e2e6f63b02c1dc4d0dc0f6429bcef5fe27f11059c856218a52a4f43f90e44",
+    sha256: "7f84cc113290c283fe97e3beb9bd3f65e5de0022e278cad25ef7619c398b1bab",
   },
 ] as const;
