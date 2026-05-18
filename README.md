@@ -2,6 +2,14 @@
 
 Canonical crypto and receipt verification primitives for CommandLayer CLAS.
 
+## Installation
+
+Install from npm (not GitHub tarball/git dependency):
+
+```bash
+npm install @commandlayer/runtime-core@1.2.0
+```
+
 ## Canonical proof envelope (CLAS)
 
 `signCommandLayerReceipt()` writes the canonical proof envelope:

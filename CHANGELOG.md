@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.2.0] — 2026-05-18
+
+### Changed
+
+- Declared npm publication readiness for `@commandlayer/runtime-core` with release metadata aligned to `dist/` exports and packaged artifacts.
+- Canonical CLAS proof envelope documentation now explicitly tracks:
+  - `metadata.proof.canonicalization = "json.sorted_keys.v1"`
+  - `metadata.proof.hash.alg = "SHA-256"`
+  - `metadata.proof.signature.alg = "Ed25519"` (with legacy lowercase verification compatibility only)
+- README installation guidance now points to npm package installs rather than GitHub git/tarball installs.
+
+### Notes
+
+- This release is a **minor bump** (1.1.0 → 1.2.0) because it preserves current public runtime behavior while formalizing release packaging and documentation for downstream consumption.
+- A major bump (`2.0.0`) is not required here because no additional breaking API change is introduced beyond the already-landed 1.1.0 breaking changes.
+
+---
+
 ## [1.1.0] — 2026-05-12
 
 ### Breaking Changes
