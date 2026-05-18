@@ -9,7 +9,7 @@ Canonical crypto and receipt verification primitives for CommandLayer CLAS.
 - `metadata.proof.canonicalization = "json.sorted_keys.v1"`
 - `metadata.proof.hash.alg = "SHA-256"`
 - `metadata.proof.hash.value = <lowercase hex digest>`
-- `metadata.proof.signature.alg = "ed25519"`
+- `metadata.proof.signature.alg = "Ed25519"`
 - `metadata.proof.signature.value = <base64 signature>`
 - `metadata.proof.signature.kid = <required key id>`
 

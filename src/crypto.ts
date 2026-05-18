@@ -17,7 +17,7 @@ import { sign, verify, generateKeyPairSync } from "node:crypto";
 
 export const PROTOCOL_VERSION = "1.1.0" as const;
 export const CANONICAL_METHOD = "json.sorted_keys.v1" as const;
-export const SIGNATURE_ALG = "ed25519" as const;
+export const SIGNATURE_ALG = "Ed25519" as const;
 
 /** The ENS text record key for the signer's public key. */
 export const ENS_KEY_PUB = "cl.sig.pub" as const;

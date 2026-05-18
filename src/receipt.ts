@@ -4,7 +4,7 @@
  * v1.1.0 signed layered receipt builder and verifier.
  *
  * Proof field names (canonical, matches clas schema):
- *   proof.alg        — signature algorithm ("ed25519")
+ *   proof.alg        — signature algorithm ("Ed25519")
  *   proof.kid        — key identifier (from ENS cl.sig.kid)
  *   proof.signer_id  — ENS name of signer (e.g. runtime.commandlayer.eth)
  *   proof.canonical  — canonicalization method ("json.sorted_keys.v1")
@@ -31,8 +31,8 @@ export interface ReceiptPayload {
 }
 
 export interface ReceiptProof {
-  /** Signature algorithm. Always "ed25519". */
-  alg: typeof SIGNATURE_ALG;
+  /** Signature algorithm. Canonical "Ed25519" (legacy lowercase accepted in verification). */
+  alg: typeof SIGNATURE_ALG | "ed25519";
   /** Key identifier from ENS cl.sig.kid */
   kid: string;
   /** ENS name of the signer */
@@ -177,7 +177,8 @@ export function verifyReceipt(
   checks.structureValid = true;
 
   // Algorithm check
-  if (proof.alg !== SIGNATURE_ALG) {
+  const normalizedAlg = proof.alg === "ed25519" ? SIGNATURE_ALG : proof.alg;
+  if (normalizedAlg !== SIGNATURE_ALG) {
     return {
       valid: false,
       checks,

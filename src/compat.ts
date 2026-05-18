@@ -35,7 +35,7 @@ export interface CommandLayerReceipt {
 export interface CommandLayerProof {
   canonicalization: string;
   hash: { alg: "SHA-256"; value: string };
-  signature: { alg: typeof SIGNATURE_ALG; value: string; kid: string };
+  signature: { alg: typeof SIGNATURE_ALG | "ed25519"; value: string; kid: string };
 }
 
 export function buildCanonicalProof(receipt: CommandLayerReceipt): string {
@@ -121,7 +121,10 @@ export function verifyCommandLayerReceipt(
   if (proof.hash?.alg && proof.hash.alg !== "SHA-256") {
     errors.push("ERR_UNSUPPORTED_HASH_ALG");
   }
-  if (proof.signature?.alg && proof.signature.alg !== SIGNATURE_ALG) {
+  const signatureAlg = proof.signature?.alg === "ed25519"
+    ? SIGNATURE_ALG
+    : proof.signature?.alg;
+  if (signatureAlg && signatureAlg !== SIGNATURE_ALG) {
     errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
   }
 
