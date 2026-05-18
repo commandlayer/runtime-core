@@ -1,7 +1,7 @@
 {
   "name": "@commandlayer/runtime-core",
-  "version": "1.1.0",
-  "description": "CommandLayer protocol core — canonicalization, Ed25519 crypto, receipt signing/verification, ENS resolution",
+  "version": "1.2.0",
+  "description": "CommandLayer protocol core \u2014 canonicalization, Ed25519 crypto, receipt signing/verification, ENS resolution",
   "license": "Apache-2.0",
   "author": "CommandLayer <team@commandlayer.org>",
   "homepage": "https://commandlayer.org",
