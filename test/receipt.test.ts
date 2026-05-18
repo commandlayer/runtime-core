@@ -32,7 +32,7 @@ describe("signReceipt", () => {
 
     const proof = receipt.signature.proof;
     // Field names must match protocol spec
-    assert.strictEqual(proof.alg, "ed25519");          // not signature_alg
+    assert.strictEqual(proof.alg, "Ed25519");          // not signature_alg
     assert.strictEqual(proof.kid, "vC4WbcNoq2znSCiQ"); // not key_id
     assert.strictEqual(proof.signer_id, "runtime.commandlayer.eth"); // not signer
     assert.strictEqual(proof.canonical, "json.sorted_keys.v1");
@@ -163,6 +163,19 @@ describe("verifyReceipt — full round trip", () => {
     assert.strictEqual(result.checks.signatureValid, false);
   });
 
+
+
+  it("accepts legacy lowercase ed25519 for compatibility", () => {
+    const { privateKeyPem, rawPublicKey } = generateEd25519KeyPair();
+    const signed = signReceipt(makePayload(), {
+      privateKeyPem, kid: "kid1", signerEns: "test.eth",
+    });
+    (signed.signature.proof as Record<string, unknown>).alg = "ed25519";
+
+    const result = verifyReceipt(signed, { rawPublicKey });
+    assert.strictEqual(result.valid, true);
+  });
+
   it("rejects unknown algorithm", () => {
     const { privateKeyPem, rawPublicKey } = generateEd25519KeyPair();
     const signed = signReceipt(makePayload(), {
@@ -203,7 +216,7 @@ describe("isSignedLayeredReceipt", () => {
   it("returns false when signature is empty string", () => {
     const obj = {
       receipt: { verb: "test", version: "1.1.0", agent: "x", timestamp: "t" },
-      signature: { proof: { alg: "ed25519", signature: "", signer_id: "x", kid: "k", canonical: "json.sorted_keys.v1" } },
+      signature: { proof: { alg: "Ed25519", signature: "", signer_id: "x", kid: "k", canonical: "json.sorted_keys.v1" } },
     };
     assert.strictEqual(isSignedLayeredReceipt(obj), false);
   });

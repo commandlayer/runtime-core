@@ -23,7 +23,7 @@ describe("canonical CLAS proof envelope", () => {
     assert.equal(proof.canonicalization, "json.sorted_keys.v1");
     assert.equal(proof.hash.alg, "SHA-256");
     assert.ok(proof.hash.value);
-    assert.equal(proof.signature.alg, "ed25519");
+    assert.equal(proof.signature.alg, "Ed25519");
     assert.ok(proof.signature.value);
     assert.equal(proof.signature.kid, "testKid");
 
@@ -32,6 +32,38 @@ describe("canonical CLAS proof envelope", () => {
     assert.deepEqual(result.checks, { schema: true, canonical_hash: true, signature: true, signer: true });
     assert.deepEqual(result.errors, []);
     assert.equal(isSignedCommandLayerReceipt(signed), true);
+  });
+
+
+
+  test("verifies canonical Ed25519 algorithm without caller normalization", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const proof = signed.metadata!.proof!;
+
+    const canonical = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...proof, signature: { ...proof.signature, alg: "Ed25519" } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(canonical.ok, true);
+
+    const legacy = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...proof, signature: { ...proof.signature, alg: "ed25519" } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(legacy.ok, true);
+  });
+
+  test("fails on unsupported signature algorithms", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const proof = signed.metadata!.proof!;
+
+    const bad = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...proof, signature: { ...proof.signature, alg: "rsa" as never } } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+
+    assert.equal(bad.status, "INVALID");
+    assert.ok(bad.errors.includes("ERR_UNSUPPORTED_SIGNATURE_ALG"));
   });
 
   test("requires signature.kid to be a non-empty string", () => {
