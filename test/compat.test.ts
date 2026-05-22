@@ -172,14 +172,14 @@ describe("canonical CLAS proof envelope", () => {
     assert.ok(result.errors.includes("ERR_MALFORMED_SIGNATURE_ARRAY"));
   });
 
-  test("erc8211 canonicalization is recognized but not falsely verified", () => {
+  test("erc8211 composable canonicalization is recognized, Merkle authorization verification deferred", () => {
     const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
     const recognized = verifyCommandLayerReceipt(
-      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "erc8211.merkle.v1" } } },
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "erc8211.composable.v1" } } },
       { publicKeyPemOrDer: kp.publicKeyPem }
     );
     assert.equal(recognized.status, "INVALID");
-    assert.ok(recognized.errors.includes("ERR_UNSUPPORTED_MERKLE_VERIFICATION"));
+    assert.ok(recognized.errors.includes("ERR_MERKLE_AUTHORIZATION_DEFERRED"));
     assert.ok(!recognized.errors.includes("ERR_UNSUPPORTED_CANONICALIZATION"));
 
     const unsupported = verifyCommandLayerReceipt(

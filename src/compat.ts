@@ -191,7 +191,7 @@ export function verifyCommandLayerReceipt(
     errors.push("ERR_MISSING_SIGNATURE_KID");
   }
 
-  const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD, "erc8211.merkle.v1"];
+  const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD, "erc8211.composable.v1"];
   if (typeof proof.canonicalization === "string" && !allowed.includes(proof.canonicalization)) {
     errors.push("ERR_UNSUPPORTED_CANONICALIZATION");
   }
@@ -221,8 +221,10 @@ export function verifyCommandLayerReceipt(
 
   let canonical = "";
   if (checks.schema) {
-    if (proof.canonicalization === "erc8211.merkle.v1") {
-      errors.push("ERR_UNSUPPORTED_MERKLE_VERIFICATION");
+    if (proof.canonicalization === "erc8211.composable.v1") {
+      // ERC-8211 composable execution canonicalization recognized.
+      // Merkle authorization verification is deferred pending the companion Merkle authorization ERC.
+      errors.push("ERR_MERKLE_AUTHORIZATION_DEFERRED");
       return { ok: false, status: "INVALID", checks, errors };
     }
     canonical = buildCanonicalProof(receipt);
