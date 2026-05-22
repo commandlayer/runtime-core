@@ -35,7 +35,75 @@ export interface CommandLayerReceipt {
 export interface CommandLayerProof {
   canonicalization: string;
   hash: { alg: "SHA-256"; value: string };
-  signature: { alg: typeof SIGNATURE_ALG | "ed25519"; value: string; kid: string };
+  signature: CommandLayerProofSignatureField;
+}
+
+export type CommandLayerProofSignature = {
+  alg: typeof SIGNATURE_ALG | "ed25519";
+  value: string;
+  kid: string;
+};
+
+export type CommandLayerProofSignatureRole =
+  | "user"
+  | "solver"
+  | "relayer"
+  | "agent"
+  | "runtime"
+  | "verifier";
+
+export type CommandLayerProofSignatureWithRole = CommandLayerProofSignature & {
+  role: CommandLayerProofSignatureRole;
+};
+
+export type CommandLayerProofSignatureField =
+  | CommandLayerProofSignature
+  | CommandLayerProofSignatureWithRole[];
+
+function isSignatureRole(value: unknown): value is CommandLayerProofSignatureRole {
+  return value === "user"
+    || value === "solver"
+    || value === "relayer"
+    || value === "agent"
+    || value === "runtime"
+    || value === "verifier";
+}
+
+export function isSingleSignature(signature: unknown): signature is CommandLayerProofSignature {
+  if (!signature || typeof signature !== "object" || Array.isArray(signature)) return false;
+  const s = signature as Record<string, unknown>;
+  return typeof s.alg === "string" && typeof s.value === "string" && typeof s.kid === "string";
+}
+
+export function isMultiSignature(signature: unknown): signature is CommandLayerProofSignatureWithRole[] {
+  if (!Array.isArray(signature) || signature.length === 0) return false;
+  return signature.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const s = entry as Record<string, unknown>;
+    return typeof s.alg === "string"
+      && typeof s.value === "string"
+      && typeof s.kid === "string"
+      && isSignatureRole(s.role);
+  });
+}
+
+export function getPrimarySignature(
+  proof: CommandLayerProof,
+  preferredRole?: CommandLayerProofSignatureRole
+): { signature?: CommandLayerProofSignature; error?: string } {
+  if (isSingleSignature(proof.signature)) return { signature: proof.signature };
+  if (!Array.isArray(proof.signature)) return { error: "ERR_MALFORMED_SIGNATURE" };
+  if (!isMultiSignature(proof.signature)) return { error: "ERR_MALFORMED_SIGNATURE_ARRAY" };
+
+  const priority: CommandLayerProofSignatureRole[] = preferredRole
+    ? [preferredRole, "runtime", "agent", "verifier"]
+    : ["runtime", "agent", "verifier"];
+
+  for (const role of priority) {
+    const match = proof.signature.find((s) => s.role === role);
+    if (match) return { signature: match };
+  }
+  return { signature: proof.signature[0] };
 }
 
 export function buildCanonicalProof(receipt: CommandLayerReceipt): string {
@@ -104,32 +172,41 @@ export function verifyCommandLayerReceipt(
   if (typeof proof.hash?.value !== "string" || proof.hash.value.length === 0) {
     errors.push("ERR_MISSING_HASH_VALUE");
   }
-  if (typeof proof.signature?.alg !== "string" || proof.signature.alg.length === 0) {
+  const primarySignatureResult = getPrimarySignature(proof as CommandLayerProof);
+  const selectedSignature = primarySignatureResult.signature;
+
+  if (primarySignatureResult.error) {
+    errors.push(primarySignatureResult.error);
+  }
+  if (!selectedSignature) {
+    errors.push("ERR_MISSING_SIGNATURE");
+  }
+  if (typeof selectedSignature?.alg !== "string" || selectedSignature.alg.length === 0) {
     errors.push("ERR_MISSING_SIGNATURE_ALG");
   }
-  if (typeof proof.signature?.value !== "string" || proof.signature.value.length === 0) {
+  if (typeof selectedSignature?.value !== "string" || selectedSignature.value.length === 0) {
     errors.push("ERR_MISSING_SIGNATURE_VALUE");
   }
-  if (typeof proof.signature?.kid !== "string" || proof.signature.kid.trim().length === 0) {
+  if (typeof selectedSignature?.kid !== "string" || selectedSignature.kid.trim().length === 0) {
     errors.push("ERR_MISSING_SIGNATURE_KID");
   }
 
-  const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD];
+  const allowed = opts.allowedCanonicals ?? [CANONICAL_METHOD, "erc8211.merkle.v1"];
   if (typeof proof.canonicalization === "string" && !allowed.includes(proof.canonicalization)) {
     errors.push("ERR_UNSUPPORTED_CANONICALIZATION");
   }
   if (proof.hash?.alg && proof.hash.alg !== "SHA-256") {
     errors.push("ERR_UNSUPPORTED_HASH_ALG");
   }
-  const signatureAlg = proof.signature?.alg === "ed25519"
+  const signatureAlg = selectedSignature?.alg === "ed25519"
     ? SIGNATURE_ALG
-    : proof.signature?.alg;
+    : selectedSignature?.alg;
   if (signatureAlg && signatureAlg !== SIGNATURE_ALG) {
     errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
   }
 
   if (opts.ensRecord) {
-    if (proof.signature?.kid !== opts.ensRecord.kid) {
+    if (selectedSignature?.kid !== opts.ensRecord.kid) {
       errors.push("ERR_ENS_KID_MISMATCH");
     }
     if (proof.canonicalization !== opts.ensRecord.canonical) {
@@ -144,6 +221,10 @@ export function verifyCommandLayerReceipt(
 
   let canonical = "";
   if (checks.schema) {
+    if (proof.canonicalization === "erc8211.merkle.v1") {
+      errors.push("ERR_UNSUPPORTED_MERKLE_VERIFICATION");
+      return { ok: false, status: "INVALID", checks, errors };
+    }
     canonical = buildCanonicalProof(receipt);
     const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
     if (recomputed === proof.hash.value) {
@@ -152,7 +233,7 @@ export function verifyCommandLayerReceipt(
       errors.push("ERR_HASH_MISMATCH");
     }
 
-    const sigOk = verifyCanonical(canonical, proof.signature.value, opts.publicKeyPemOrDer);
+    const sigOk = verifyCanonical(canonical, selectedSignature!.value, opts.publicKeyPemOrDer);
     if (sigOk) {
       checks.signature = true;
     } else {
@@ -175,9 +256,10 @@ export function verifyCommandLayerReceipt(
 
 export function isSignedCommandLayerReceipt(value: unknown): value is CommandLayerReceipt {
   const v = value as CommandLayerReceipt;
+  const signature = v?.metadata?.proof?.signature;
+  const hasValidSignature = isSingleSignature(signature)
+    || (Array.isArray(signature) && isMultiSignature(signature));
   return !!v?.metadata?.proof?.hash?.alg
     && !!v?.metadata?.proof?.hash?.value
-    && !!v?.metadata?.proof?.signature?.alg
-    && !!v?.metadata?.proof?.signature?.value
-    && !!v?.metadata?.proof?.signature?.kid;
+    && hasValidSignature;
 }

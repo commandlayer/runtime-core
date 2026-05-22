@@ -4,6 +4,7 @@ import {
   signCommandLayerReceipt,
   verifyCommandLayerReceipt,
   isSignedCommandLayerReceipt,
+  isMultiSignature,
 } from "../src/compat.js";
 import { generateEd25519KeyPair } from "../src/crypto.js";
 
@@ -110,5 +111,81 @@ describe("canonical CLAS proof envelope", () => {
     const ok = verifyCommandLayerReceipt(signed, { publicKeyPemOrDer: kp.publicKeyPem, ensRecord: runtimeEnsFixture });
     assert.equal(ok.ok, true);
     assert.equal(ok.checks.signer, true);
+  });
+
+  test("accepts multi-signature array shape and signed receipt guard", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const sig = signed.metadata!.proof!.signature;
+    const multiSig = [
+      { ...sig, role: "agent" as const },
+      { ...sig, role: "runtime" as const },
+    ];
+    const multi = { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, signature: multiSig } } };
+    assert.equal(isMultiSignature(multiSig), true);
+    assert.equal(isSignedCommandLayerReceipt(multi), true);
+  });
+
+  test("multi-signature verify path does not throw and verifies selected signature", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const sig = signed.metadata!.proof!.signature;
+    const multi = {
+      ...signed,
+      metadata: {
+        ...signed.metadata!,
+        proof: {
+          ...signed.metadata!.proof!,
+          signature: [
+            { ...sig, role: "user" as const },
+            { ...sig, role: "runtime" as const },
+          ],
+        },
+      },
+    };
+    const result = verifyCommandLayerReceipt(multi, { publicKeyPemOrDer: kp.publicKeyPem });
+    assert.equal(result.status, "VERIFIED");
+  });
+
+  test("metadata.trace is ignored safely", () => {
+    const withTrace = {
+      ...baseReceipt,
+      metadata: { ...baseReceipt.metadata, trace: [{ step: "signed" }] },
+    };
+    const signed = signCommandLayerReceipt(withTrace, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const result = verifyCommandLayerReceipt(signed, { publicKeyPemOrDer: kp.publicKeyPem });
+    assert.equal(result.status, "VERIFIED");
+  });
+
+  test("malformed signature arrays return INVALID result without throwing", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const malformed = {
+      ...signed,
+      metadata: {
+        ...signed.metadata!,
+        proof: {
+          ...signed.metadata!.proof!,
+          signature: [{ alg: "Ed25519", value: "abc", kid: "kid-without-role" }],
+        },
+      },
+    };
+    const result = verifyCommandLayerReceipt(malformed, { publicKeyPemOrDer: kp.publicKeyPem });
+    assert.equal(result.status, "INVALID");
+    assert.ok(result.errors.includes("ERR_MALFORMED_SIGNATURE_ARRAY"));
+  });
+
+  test("erc8211 canonicalization is recognized but not falsely verified", () => {
+    const signed = signCommandLayerReceipt(baseReceipt, { privateKeyPem: kp.privateKeyPem, kid: "testKid" });
+    const recognized = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "erc8211.merkle.v1" } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.equal(recognized.status, "INVALID");
+    assert.ok(recognized.errors.includes("ERR_UNSUPPORTED_MERKLE_VERIFICATION"));
+    assert.ok(!recognized.errors.includes("ERR_UNSUPPORTED_CANONICALIZATION"));
+
+    const unsupported = verifyCommandLayerReceipt(
+      { ...signed, metadata: { ...signed.metadata!, proof: { ...signed.metadata!.proof!, canonicalization: "random.unsupported.v1" } } },
+      { publicKeyPemOrDer: kp.publicKeyPem }
+    );
+    assert.ok(unsupported.errors.includes("ERR_UNSUPPORTED_CANONICALIZATION"));
   });
 });
