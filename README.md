@@ -78,3 +78,21 @@ npm run build
 npm test
 npm run typecheck
 ```
+
+## CLAS scoped execution and settlement proofs
+
+`clas.execution.receipt.v1` receipts may contain `proofs[]` with multiple attestations over different receipt slices:
+
+Private settlement, public accountability.
+The agent signs execution.
+The settlement rail or payer signs settlement.
+The shared receipt_id binds both attestations into one receipt.
+
+Runtime-core verifies scoped proofs with the existing `json.sorted_keys.v1` canonicalization. `buildCoveredPayload(receipt, proof)` first materializes only the top-level fields listed by `proof.covers[]`, then canonicalizes that covered payload with recursively sorted object keys before SHA-256 hashing and Ed25519 verification.
+
+Coverage is intentionally exact and ordered to match CLAS examples:
+
+- execution proofs must use `covers: ["receipt_id", "verb", "agent", "action"]`
+- settlement proofs must use `covers: ["receipt_id", "settlement"]`
+
+A settlement object requires a valid settlement proof. Tampering settlement fields invalidates only the settlement proof, while execution proofs remain scoped to execution fields. Existing `metadata.proof` verification remains available through `verifyCommandLayerReceipt()` for older single-proof receipts.

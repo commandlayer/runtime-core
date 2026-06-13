@@ -20,6 +20,42 @@ export interface VerifyCommandLayerReceiptResult {
   errors: string[];
 }
 
+export type ScopedProofType = "execution" | "settlement";
+
+export interface CommandLayerScopedProof {
+  type: string;
+  covers: string[];
+  canonicalization: string;
+  hash: { alg: "SHA-256"; value: string };
+  signature: CommandLayerProofSignature & { signer?: string; signer_id?: string };
+}
+
+export interface VerifyScopedProofResult {
+  type: string;
+  signer?: string;
+  covered: string[];
+  signature_valid: boolean;
+  hash_matches: boolean;
+  ok: boolean;
+  errors: string[];
+}
+
+export interface VerifyScopedProofsResult {
+  ok: boolean;
+  status: "VERIFIED" | "INVALID";
+  proofs: VerifyScopedProofResult[];
+  errors: string[];
+}
+
+export interface VerifyScopedProofsOptions {
+  /** PEM public key used for every proof when proofs share a key. */
+  publicKeyPemOrDer?: string;
+  /** PEM public keys by signature kid for receipts with multiple signers. */
+  publicKeysByKid?: Record<string, string>;
+  /** Optional public key resolver for custom key lookup. It must not perform network calls in core primitives. */
+  resolvePublicKey?: (proof: CommandLayerScopedProof) => string | undefined;
+}
+
 export interface CommandLayerReceipt {
   verb: string;
   version?: string;
@@ -29,6 +65,7 @@ export interface CommandLayerReceipt {
     proof?: CommandLayerProof;
     [key: string]: unknown;
   };
+  proofs?: CommandLayerScopedProof[];
   [key: string]: unknown;
 }
 
@@ -112,6 +149,129 @@ export function buildCanonicalProof(receipt: CommandLayerReceipt): string {
   const payload: Record<string, unknown> = { ...rest, metadata: metaWithoutProof };
   if (Object.keys(metaWithoutProof).length === 0) delete payload.metadata;
   return canonicalize(payload);
+}
+
+export const SCOPED_PROOF_COVERS: Record<ScopedProofType, readonly string[]> = {
+  execution: ["receipt_id", "verb", "agent", "action"],
+  settlement: ["receipt_id", "settlement"],
+} as const;
+
+function isSupportedScopedProofType(type: string): type is ScopedProofType {
+  return type === "execution" || type === "settlement";
+}
+
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+export function buildCoveredPayload(
+  receipt: CommandLayerReceipt,
+  proof: Pick<CommandLayerScopedProof, "type" | "covers">
+): Record<string, unknown> {
+  if (!proof || typeof proof !== "object") throw new Error("ERR_MALFORMED_PROOF");
+  if (typeof proof.type !== "string" || !isSupportedScopedProofType(proof.type)) {
+    throw new Error("ERR_UNSUPPORTED_PROOF_TYPE");
+  }
+  if (!Array.isArray(proof.covers) || !proof.covers.every((field) => typeof field === "string")) {
+    throw new Error("ERR_MALFORMED_COVERS");
+  }
+  const expected = SCOPED_PROOF_COVERS[proof.type];
+  if (!arraysEqual(proof.covers, expected)) {
+    throw new Error(`ERR_INVALID_${proof.type.toUpperCase()}_COVERS`);
+  }
+
+  const source = receipt as Record<string, unknown>;
+  const payload: Record<string, unknown> = {};
+  for (const field of proof.covers) {
+    if (!(field in source) || source[field] === undefined) {
+      throw new Error(`ERR_MISSING_COVERED_FIELD:${field}`);
+    }
+    payload[field] = source[field];
+  }
+  return payload;
+}
+
+function getScopedProofSigner(proof: CommandLayerScopedProof): string | undefined {
+  return proof.signature.signer ?? proof.signature.signer_id;
+}
+
+export function verifyScopedProof(
+  receipt: CommandLayerReceipt,
+  proof: CommandLayerScopedProof,
+  opts: VerifyScopedProofsOptions
+): VerifyScopedProofResult {
+  const errors: string[] = [];
+  const covered = Array.isArray(proof?.covers) ? [...proof.covers] : [];
+  const result: VerifyScopedProofResult = {
+    type: typeof proof?.type === "string" ? proof.type : "",
+    signer: proof ? getScopedProofSigner(proof) : undefined,
+    covered,
+    signature_valid: false,
+    hash_matches: false,
+    ok: false,
+    errors,
+  };
+
+  if (!proof || typeof proof !== "object") errors.push("ERR_MALFORMED_PROOF");
+  if (typeof proof?.canonicalization !== "string" || proof.canonicalization !== CANONICAL_METHOD) errors.push("ERR_UNSUPPORTED_CANONICALIZATION");
+  if (proof?.hash?.alg !== "SHA-256") errors.push("ERR_UNSUPPORTED_HASH_ALG");
+  if (typeof proof?.hash?.value !== "string" || !/^[0-9a-f]+$/.test(proof.hash.value)) errors.push("ERR_MISSING_HASH_VALUE");
+  if (!proof?.signature || typeof proof.signature !== "object") errors.push("ERR_MISSING_SIGNATURE");
+  const signatureAlg = proof?.signature?.alg === "ed25519" ? SIGNATURE_ALG : proof?.signature?.alg;
+  if (signatureAlg !== SIGNATURE_ALG) errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
+  if (typeof proof?.signature?.value !== "string" || proof.signature.value.length === 0) errors.push("ERR_MISSING_SIGNATURE_VALUE");
+  if (typeof proof?.signature?.kid !== "string" || proof.signature.kid.trim().length === 0) errors.push("ERR_MISSING_SIGNATURE_KID");
+
+  let canonical = "";
+  if (errors.length === 0) {
+    try {
+      canonical = canonicalize(buildCoveredPayload(receipt, proof));
+    } catch (err) {
+      errors.push((err as Error).message);
+    }
+  }
+
+  if (errors.length === 0) {
+    const recomputed = createHash("sha256").update(canonical, "utf8").digest("hex");
+    result.hash_matches = recomputed === proof.hash.value;
+    if (!result.hash_matches) errors.push("ERR_HASH_MISMATCH");
+  }
+
+  if (errors.length === 0) {
+    const key = opts.resolvePublicKey?.(proof) ?? opts.publicKeysByKid?.[proof.signature.kid] ?? opts.publicKeyPemOrDer;
+    if (!key) {
+      errors.push("ERR_MISSING_PUBLIC_KEY");
+    } else if (verifyCanonical(canonical, proof.signature.value, key)) {
+      result.signature_valid = true;
+    } else {
+      errors.push("ERR_SIGNATURE_INVALID");
+    }
+  }
+
+  result.ok = errors.length === 0 && result.hash_matches && result.signature_valid;
+  return result;
+}
+
+export function verifyScopedProofs(
+  receipt: CommandLayerReceipt,
+  opts: VerifyScopedProofsOptions
+): VerifyScopedProofsResult {
+  const errors: string[] = [];
+  if (!opts.publicKeyPemOrDer && !opts.publicKeysByKid && !opts.resolvePublicKey) {
+    throw new Error("verifyScopedProofs requires publicKeyPemOrDer, publicKeysByKid, or resolvePublicKey");
+  }
+  if (!Array.isArray(receipt.proofs) || receipt.proofs.length === 0) {
+    errors.push("ERR_MISSING_PROOFS");
+    return { ok: false, status: "INVALID", proofs: [], errors };
+  }
+
+  const proofs = receipt.proofs.map((proof) => verifyScopedProof(receipt, proof, opts));
+  if (receipt.settlement !== undefined && !proofs.some((proof) => proof.type === "settlement" && proof.ok)) {
+    errors.push("ERR_MISSING_SETTLEMENT_PROOF");
+  }
+
+  const ok = proofs.every((proof) => proof.ok) && errors.length === 0;
+  return { ok, status: ok ? "VERIFIED" : "INVALID", proofs, errors };
 }
 
 export function signCommandLayerReceipt(
