@@ -95,4 +95,35 @@ Coverage is intentionally exact and ordered to match CLAS examples:
 - execution proofs must use `covers: ["receipt_id", "verb", "agent", "action"]`
 - settlement proofs must use `covers: ["receipt_id", "settlement"]`
 
+Runtime-core also owns signing for these fixed proof scopes. Callers choose the proof type, signer identity, and key id; they do not supply arbitrary `covers[]` values.
+
+```ts
+import {
+  signExecutionScopedProof,
+  signSettlementScopedProof,
+  verifyScopedProofs,
+} from "@commandlayer/runtime-core";
+
+const executionSigned = signExecutionScopedProof(receipt, {
+  privateKeyPem: executionPrivateKey,
+  kid: "execution-kid",
+  signer: "exampleagent.eth",
+});
+
+const fullySigned = signSettlementScopedProof(executionSigned, {
+  privateKeyPem: settlementPrivateKey,
+  kid: "settlement-kid",
+  signer: "settlement:provider",
+});
+
+const result = verifyScopedProofs(fullySigned, {
+  publicKeysByKid: {
+    "execution-kid": executionPublicKey,
+    "settlement-kid": settlementPublicKey,
+  },
+});
+```
+
+`signExecutionScopedProof()` cannot include settlement fields because runtime-core chooses the execution coverage. `signSettlementScopedProof()` fails when the receipt has no settlement object. Both helpers return a new receipt rather than mutating the input.
+
 A settlement object requires a valid settlement proof. Tampering settlement fields invalidates only the settlement proof, while execution proofs remain scoped to execution fields. Existing `metadata.proof` verification remains available through `verifyCommandLayerReceipt()` for older single-proof receipts.
