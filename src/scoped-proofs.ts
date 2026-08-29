@@ -3,7 +3,7 @@ import { CANONICAL_METHOD, SIGNATURE_ALG, signCanonical, verifyCanonical } from 
 import { SCOPED_PROOF_COVERS, type ScopedProofType } from "./compat.js";
 
 export interface ClasScopedSignature {
-  alg: typeof SIGNATURE_ALG | "ed25519";
+  alg: typeof SIGNATURE_ALG;
   kid: string;
   value: string;
 }
@@ -55,6 +55,9 @@ export interface VerifyClasScopedProofsOptions {
   resolvePublicKey?: (proof: ClasScopedProof) => string | undefined;
 }
 
+const CLAS_PROOF_FIELDS = Object.freeze(["type", "covers", "signer", "canonicalization", "signature"]);
+const CLAS_SIGNATURE_FIELDS = Object.freeze(["alg", "kid", "value"]);
+
 function requireNonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${field} is required`);
@@ -68,6 +71,22 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 
 function assertProofType(type: unknown): asserts type is ScopedProofType {
   if (type !== "execution" && type !== "settlement") throw new Error("ERR_UNSUPPORTED_PROOF_TYPE");
+}
+
+function unexpectedKeys(value: unknown, allowed: readonly string[]): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const allowedSet = new Set(allowed);
+  return Object.keys(value as Record<string, unknown>).filter((key) => !allowedSet.has(key));
+}
+
+function strictShapeErrors(proof: unknown): string[] {
+  if (!proof || typeof proof !== "object" || Array.isArray(proof)) return ["ERR_MALFORMED_PROOF"];
+  const typed = proof as Record<string, unknown>;
+  const errors = unexpectedKeys(typed, CLAS_PROOF_FIELDS).map((field) => `ERR_UNEXPECTED_PROOF_FIELD:${field}`);
+  if (typed.signature && typeof typed.signature === "object" && !Array.isArray(typed.signature)) {
+    errors.push(...unexpectedKeys(typed.signature, CLAS_SIGNATURE_FIELDS).map((field) => `ERR_UNEXPECTED_SIGNATURE_FIELD:${field}`));
+  }
+  return errors;
 }
 
 /**
@@ -137,6 +156,8 @@ export function appendScopedProof(
   proof: ClasScopedProof,
 ): ClasExecutionReceipt {
   if (!receipt || typeof receipt !== "object") throw new Error("receipt is required");
+  const shapeErrors = strictShapeErrors(proof);
+  if (shapeErrors.length > 0) throw new Error(shapeErrors[0]);
   requireNonEmptyString(proof?.signer, "proof.signer");
   buildClasScopedPayload(receipt, proof);
   return { ...receipt, proofs: [...(receipt.proofs ?? []), proof] };
@@ -169,7 +190,7 @@ export function verifyClasScopedProof(
   proof: ClasScopedProof,
   options: VerifyClasScopedProofsOptions,
 ): VerifyClasScopedProofResult {
-  const errors: string[] = [];
+  const errors: string[] = strictShapeErrors(proof);
   const type = proof?.type === "settlement" ? "settlement" : "execution";
   const result: VerifyClasScopedProofResult = {
     type,
@@ -180,13 +201,11 @@ export function verifyClasScopedProof(
     errors,
   };
 
-  if (!proof || typeof proof !== "object") errors.push("ERR_MALFORMED_PROOF");
   if (proof?.type !== "execution" && proof?.type !== "settlement") errors.push("ERR_UNSUPPORTED_PROOF_TYPE");
   if (typeof proof?.signer !== "string" || proof.signer.trim().length === 0) errors.push("ERR_MISSING_SIGNER");
   if (proof?.canonicalization !== CANONICAL_METHOD) errors.push("ERR_UNSUPPORTED_CANONICALIZATION");
   if (!proof?.signature || typeof proof.signature !== "object") errors.push("ERR_MISSING_SIGNATURE");
-  const signatureAlg = proof?.signature?.alg === "ed25519" ? SIGNATURE_ALG : proof?.signature?.alg;
-  if (signatureAlg !== SIGNATURE_ALG) errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
+  if (proof?.signature?.alg !== SIGNATURE_ALG) errors.push("ERR_UNSUPPORTED_SIGNATURE_ALG");
   if (typeof proof?.signature?.kid !== "string" || proof.signature.kid.trim().length === 0) errors.push("ERR_MISSING_SIGNATURE_KID");
   if (typeof proof?.signature?.value !== "string" || proof.signature.value.length === 0) errors.push("ERR_MISSING_SIGNATURE_VALUE");
 
