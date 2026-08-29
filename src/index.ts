@@ -7,6 +7,7 @@
  * Public API surface:
  *   - Protocol constants
  *   - Canonicalization (json.sorted_keys.v1)
+ *   - Canonical SHA-256 hashing
  *   - Ed25519 crypto (sign, verify, key encoding)
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
@@ -27,8 +28,9 @@ export {
   ENS_KEY_SIGNER,
 } from "./crypto.js";
 
-// Canonicalization
+// Canonicalization and hashing
 export { canonicalize, CANONICAL_TEST_VECTORS } from "./canonicalize.js";
+export { sha256Text, hashCanonical } from "./hash.js";
 
 // Crypto primitives
 export {
