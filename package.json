@@ -1,7 +1,7 @@
 {
   "name": "@commandlayer/runtime-core",
   "version": "1.2.0",
-  "description": "CommandLayer protocol core \u2014 canonicalization, Ed25519 crypto, receipt signing/verification, ENS resolution",
+  "description": "CommandLayer protocol core — canonicalization, Ed25519 crypto, receipt signing/verification, ENS resolution",
   "license": "Apache-2.0",
   "author": "CommandLayer <team@commandlayer.org>",
   "homepage": "https://commandlayer.org",
@@ -32,6 +32,10 @@
     "./receipt": {
       "import": "./dist/receipt.js",
       "types": "./dist/receipt.d.ts"
+    },
+    "./execution-evidence": {
+      "import": "./dist/execution-evidence.js",
+      "types": "./dist/execution-evidence.d.ts"
     },
     "./compat": {
       "import": "./dist/compat.js",
