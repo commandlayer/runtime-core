@@ -11,6 +11,7 @@
  *   - Ed25519 crypto (sign, verify, key encoding)
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
+ *   - Rail-neutral Machine-Service Factory execution receipts
  *   - Strict CLAS scoped execution/settlement proof signing and verification
  *   - Legacy scoped-proof verification compatibility
  *   - Test vectors
@@ -52,6 +53,23 @@ export {
   type EnsResolver,
   type ResolveSignerFromENSOptions,
 } from "./ens.js";
+
+// Rail-neutral Machine-Service Factory execution receipt APIs. These do not
+// require ENS, ERC-8004, x402, or any other identity/settlement adapter.
+export {
+  FACTORY_EXECUTION_RECEIPT_PROFILE,
+  FACTORY_EXECUTION_PROOF_COVERS,
+  buildFactoryExecutionPayload,
+  createFactoryExecutionProof,
+  signFactoryExecutionReceipt,
+  verifyFactoryExecutionReceipt,
+  type FactoryExecutionProofSignature,
+  type FactoryExecutionProof,
+  type FactoryExecutionReceipt,
+  type SignFactoryExecutionReceiptOptions,
+  type VerifyFactoryExecutionReceiptOptions,
+  type VerifyFactoryExecutionReceiptResult,
+} from "./factory-receipts.js";
 
 // Legacy/compat proof envelope APIs. `verifyScopedProofs` remains available for
 // older hash-bearing scoped proofs; new CLAS execution receipts should use the
