@@ -10,7 +10,8 @@
  *   - Ed25519 crypto (sign, verify, key encoding)
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
- *   - Scoped execution/settlement proof signing and verification
+ *   - Strict CLAS scoped execution/settlement proof signing and verification
+ *   - Legacy scoped-proof verification compatibility
  *   - Test vectors
  *   - Backward-compatibility shims (for runtime/server.mjs)
  */
@@ -50,7 +51,9 @@ export {
   type ResolveSignerFromENSOptions,
 } from "./ens.js";
 
-// CommandLayer canonical proof envelope APIs
+// Legacy/compat proof envelope APIs. `verifyScopedProofs` remains available for
+// older hash-bearing scoped proofs; new CLAS execution receipts should use the
+// strict `verifyClasScopedProofs` surface exported below.
 export {
   buildCanonicalProof,
   signCommandLayerReceipt,
@@ -77,13 +80,21 @@ export {
   type VerifyScopedProofsOptions,
 } from "./compat.js";
 
-// Fixed-coverage scoped proof signing. These helpers keep execution and
-// settlement signatures separate and prevent downstream crypto duplication.
+// Canonical CLAS `clas.execution.receipt.v1` scoped-proof APIs.
 export {
+  buildClasScopedPayload,
   createScopedProof,
   appendScopedProof,
   signScopedProof,
   signExecutionScopedProof,
   signSettlementScopedProof,
+  verifyClasScopedProof,
+  verifyClasScopedProofs,
+  type ClasScopedSignature,
+  type ClasScopedProof,
+  type ClasExecutionReceipt,
   type SignScopedProofOptions,
+  type VerifyClasScopedProofResult,
+  type VerifyClasScopedProofsResult,
+  type VerifyClasScopedProofsOptions,
 } from "./scoped-proofs.js";
