@@ -12,7 +12,7 @@ npm install @commandlayer/runtime-core@1.2.0
 
 ## Canonical proof envelope (CLAS)
 
-`signCommandLayerReceipt()` writes the canonical proof envelope:
+`signCommandLayerReceipt()` writes the legacy/single-proof canonical envelope:
 
 - `metadata.proof.canonicalization = "json.sorted_keys.v1"`
 - `metadata.proof.hash.alg = "SHA-256"`
@@ -26,15 +26,9 @@ import { signCommandLayerReceipt, verifyCommandLayerReceipt } from "@commandlaye
 
 const signed = signCommandLayerReceipt(receipt, { privateKeyPem, kid: "vC4WbcNoq2znSCiQ" });
 const result = verifyCommandLayerReceipt(signed, { publicKeyPemOrDer: publicKeyPem });
-
-// result shape
-// {
-//   ok: boolean,
-//   status: "VERIFIED" | "INVALID",
-//   checks: { schema, canonical_hash, signature, signer },
-//   errors: string[]
-// }
 ```
+
+This surface remains for backward compatibility. New `clas.execution.receipt.v1` receipts use the strict scoped-proof API below.
 
 ## ENS signer records
 
@@ -79,20 +73,63 @@ npm test
 npm run typecheck
 ```
 
-## CLAS scoped execution and settlement proofs
+## Strict CLAS scoped execution and settlement proofs
 
-`clas.execution.receipt.v1` receipts may contain `proofs[]` with multiple attestations over different receipt slices:
+The canonical `clas.execution.receipt.v1` proof shape follows the CLAS execution schema:
 
-Private settlement, public accountability.
-The agent signs execution.
-The settlement rail or payer signs settlement.
-The shared receipt_id binds both attestations into one receipt.
+```json
+{
+  "type": "execution",
+  "covers": ["receipt_id", "verb", "agent", "action"],
+  "signer": "exampleagent.eth",
+  "canonicalization": "json.sorted_keys.v1",
+  "signature": {
+    "alg": "Ed25519",
+    "kid": "execution-kid",
+    "value": "..."
+  }
+}
+```
 
-Runtime-core verifies scoped proofs with the existing `json.sorted_keys.v1` canonicalization. `buildCoveredPayload(receipt, proof)` first materializes only the top-level fields listed by `proof.covers[]`, then canonicalizes that covered payload with recursively sorted object keys before SHA-256 hashing and Ed25519 verification.
+Important compatibility boundary:
 
-Coverage is intentionally exact and ordered to match CLAS examples:
+- canonical CLAS scoped proofs keep `signer` **top-level**;
+- canonical CLAS scoped proofs do **not** contain a separate `hash` field;
+- the Ed25519 signature is over the raw UTF-8 bytes of the canonical covered payload;
+- execution coverage is exactly `["receipt_id", "verb", "agent", "action"]`;
+- settlement coverage is exactly `["receipt_id", "settlement"]`.
 
-- execution proofs must use `covers: ["receipt_id", "verb", "agent", "action"]`
-- settlement proofs must use `covers: ["receipt_id", "settlement"]`
+Runtime-core owns both strict signing and strict verification so downstream applications do not reimplement canonicalization or crypto.
 
-A settlement object requires a valid settlement proof. Tampering settlement fields invalidates only the settlement proof, while execution proofs remain scoped to execution fields. Existing `metadata.proof` verification remains available through `verifyCommandLayerReceipt()` for older single-proof receipts.
+```ts
+import {
+  signExecutionScopedProof,
+  signSettlementScopedProof,
+  verifyClasScopedProofs,
+} from "@commandlayer/runtime-core";
+
+const executionSigned = signExecutionScopedProof(receipt, {
+  privateKeyPem: executionPrivateKey,
+  kid: "execution-kid",
+  signer: "exampleagent.eth",
+});
+
+const fullySigned = signSettlementScopedProof(executionSigned, {
+  privateKeyPem: settlementPrivateKey,
+  kid: "settlement-kid",
+  signer: "settlement:provider",
+});
+
+const result = verifyClasScopedProofs(fullySigned, {
+  publicKeysByKid: {
+    "execution-kid": executionPublicKey,
+    "settlement-kid": settlementPublicKey,
+  },
+});
+```
+
+`signExecutionScopedProof()` cannot include settlement fields because runtime-core chooses proof coverage. `signSettlementScopedProof()` fails when the receipt has no settlement object. Both return a new receipt rather than mutating the input.
+
+`verifyClasScopedProofs()` is the strict verifier for new CLAS execution receipts. The older `verifyScopedProofs()` export remains available only as a compatibility surface for pre-schema/hash-bearing scoped proofs and should not be used to generate or define new receipt formats.
+
+A settlement object requires a valid settlement proof. Tampering action fields invalidates the execution proof without invalidating settlement proof, and tampering settlement fields invalidates settlement proof without changing the execution proof.
