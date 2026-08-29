@@ -10,6 +10,7 @@
  *   - Ed25519 crypto (sign, verify, key encoding)
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
+ *   - Scoped execution/settlement proof signing and verification
  *   - Test vectors
  *   - Backward-compatibility shims (for runtime/server.mjs)
  */
@@ -75,3 +76,14 @@ export {
   type VerifyScopedProofsResult,
   type VerifyScopedProofsOptions,
 } from "./compat.js";
+
+// Fixed-coverage scoped proof signing. These helpers keep execution and
+// settlement signatures separate and prevent downstream crypto duplication.
+export {
+  createScopedProof,
+  appendScopedProof,
+  signScopedProof,
+  signExecutionScopedProof,
+  signSettlementScopedProof,
+  type SignScopedProofOptions,
+} from "./scoped-proofs.js";
