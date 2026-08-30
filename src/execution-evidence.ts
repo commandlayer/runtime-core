@@ -79,6 +79,33 @@ export interface SignFactoryExecutionReceiptOptions {
   signerId: string;
 }
 
+/**
+ * Input passed to a non-exportable signing backend (KMS/HSM/TEE/etc.).
+ * `message` is exactly the UTF-8 bytes of json.sorted_keys.v1 canonicalization.
+ * The callback must sign these bytes directly with Ed25519 and return a raw
+ * 64-byte signature or its standard-base64 representation.
+ */
+export interface FactoryExternalSignRequest {
+  alg: typeof SIGNATURE_ALG;
+  canonical: typeof CANONICAL_METHOD;
+  profile: typeof FACTORY_EXECUTION_RECEIPT_PROFILE;
+  kid: string;
+  signerId: string;
+  message: Uint8Array;
+}
+
+export type FactoryExternalSignature = Uint8Array | string;
+
+export type FactoryExternalSigner = (
+  request: FactoryExternalSignRequest
+) => Promise<FactoryExternalSignature> | FactoryExternalSignature;
+
+export interface SignFactoryExecutionReceiptWithSignerOptions {
+  kid: string;
+  signerId: string;
+  sign: FactoryExternalSigner;
+}
+
 export interface FactoryVerificationKey {
   publicKeyPem?: string;
   rawPublicKey?: Uint8Array;
@@ -221,6 +248,40 @@ function unsignedReceipt(receipt: SignedFactoryExecutionReceipt): FactoryExecuti
   return unsigned;
 }
 
+function buildSignedFactoryExecutionReceipt(
+  receipt: FactoryExecutionReceipt,
+  signature: string,
+  kid: string,
+  signerId: string
+): SignedFactoryExecutionReceipt {
+  return {
+    ...receipt,
+    proof: {
+      alg: SIGNATURE_ALG,
+      kid: kid.trim(),
+      signer_id: signerId.trim(),
+      canonical: CANONICAL_METHOD,
+      signature,
+    },
+  };
+}
+
+function normalizeExternalSignature(signature: FactoryExternalSignature): string {
+  let bytes: Buffer;
+  if (typeof signature === "string") {
+    if (!nonEmpty(signature)) throw new TypeError("external signer returned an empty signature");
+    bytes = Buffer.from(signature, "base64");
+  } else if (signature instanceof Uint8Array) {
+    bytes = Buffer.from(signature);
+  } else {
+    throw new TypeError("external signer must return a Uint8Array or base64 string");
+  }
+  if (bytes.length !== 64) {
+    throw new TypeError(`external Ed25519 signature must be 64 bytes, got ${bytes.length}`);
+  }
+  return bytes.toString("base64");
+}
+
 export function signFactoryExecutionReceipt(
   receipt: FactoryExecutionReceipt,
   opts: SignFactoryExecutionReceiptOptions
@@ -231,16 +292,36 @@ export function signFactoryExecutionReceipt(
   if (!nonEmpty(opts?.signerId)) throw new TypeError("signerId is required");
 
   const signature = signCanonical(canonicalize(receipt), opts.privateKeyPem);
-  return {
-    ...receipt,
-    proof: {
-      alg: SIGNATURE_ALG,
-      kid: opts.kid.trim(),
-      signer_id: opts.signerId.trim(),
-      canonical: CANONICAL_METHOD,
-      signature,
-    },
-  };
+  return buildSignedFactoryExecutionReceipt(receipt, signature, opts.kid, opts.signerId);
+}
+
+/**
+ * Sign a factory receipt through an external Ed25519 signer without exposing
+ * private key material to runtime-core. This is the production KMS/HSM/TEE
+ * integration surface. runtime-core owns canonicalization and validates the
+ * returned signature shape before constructing the proof envelope.
+ */
+export async function signFactoryExecutionReceiptWithSigner(
+  receipt: FactoryExecutionReceipt,
+  opts: SignFactoryExecutionReceiptWithSignerOptions
+): Promise<SignedFactoryExecutionReceipt> {
+  assertFactoryExecutionReceipt(receipt);
+  if (!nonEmpty(opts?.kid)) throw new TypeError("kid is required");
+  if (!nonEmpty(opts?.signerId)) throw new TypeError("signerId is required");
+  if (typeof opts?.sign !== "function") throw new TypeError("external sign callback is required");
+
+  const canonical = canonicalize(receipt);
+  const message = new Uint8Array(Buffer.from(canonical, "utf8"));
+  const returned = await opts.sign({
+    alg: SIGNATURE_ALG,
+    canonical: CANONICAL_METHOD,
+    profile: FACTORY_EXECUTION_RECEIPT_PROFILE,
+    kid: opts.kid.trim(),
+    signerId: opts.signerId.trim(),
+    message,
+  });
+  const signature = normalizeExternalSignature(returned);
+  return buildSignedFactoryExecutionReceipt(receipt, signature, opts.kid, opts.signerId);
 }
 
 function blankResult(): VerifyFactoryExecutionReceiptResult {
