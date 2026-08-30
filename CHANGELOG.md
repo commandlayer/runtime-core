@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.3.0] — 2026-08-30
+
+### Added
+
+- `commandlayer.execution-evidence.v1` — a rail-neutral execution-evidence receipt profile for Machine-Service Factory outcomes.
+- `signFactoryExecutionReceipt()` — direct Ed25519 receipt signing.
+- `signFactoryExecutionReceiptWithSigner()` — non-exportable external signer surface for KMS/HSM/TEE backends.
+- `verifyFactoryExecutionReceipt()` — strict independent receipt verification with direct public-key or asynchronous key-resolver support.
+- `@commandlayer/runtime-core/execution-evidence` package export.
+- Fail-closed validation for service/version, timestamps, request/input/output/workflow hashes, signer identity, key identity, signature validity, and payment-field exclusion.
+
+### Security
+
+- The external signer API signs the exact UTF-8 bytes of `json.sorted_keys.v1` canonicalization; private key material never needs to enter the caller process.
+- Execution evidence explicitly rejects payment/settlement/transaction fields so payment proof remains separate from execution proof.
+- Verification supports exact `kid` and `signer_id` binding and fails closed when key resolution fails or returns mismatched identity.
+
+### Notes
+
+- This is an additive minor release (`1.2.0` → `1.3.0`). Existing layered/CLAS receipt APIs remain unchanged.
+- The Machine-Service Factory production path is designed to use this external signer API with a non-exportable Ed25519 signing backend.
+
+---
+
 ## [1.2.0] — 2026-05-18
 
 ### Changed

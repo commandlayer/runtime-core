@@ -10,6 +10,7 @@
  *   - Ed25519 crypto (sign, verify, key encoding)
  *   - ENS resolution
  *   - Receipt building and verification (v1.1.0)
+ *   - Machine-Service Factory execution evidence (commandlayer.execution-evidence.v1)
  *   - Test vectors
  *   - Backward-compatibility shims (for runtime/server.mjs)
  */
@@ -48,6 +49,32 @@ export {
   type EnsResolver,
   type ResolveSignerFromENSOptions,
 } from "./ens.js";
+
+// Machine-Service Factory execution evidence
+export {
+  FACTORY_EXECUTION_RECEIPT_PROFILE,
+  assertFactoryExecutionReceipt,
+  signFactoryExecutionReceipt,
+  signFactoryExecutionReceiptWithSigner,
+  verifyFactoryExecutionReceipt,
+  type AcceptanceStatus,
+  type FactoryProviderStep,
+  type FactoryAcceptanceCheck,
+  type FactoryExecutionEvidence,
+  type FactoryExecutionReceipt,
+  type FactoryExecutionProof,
+  type SignedFactoryExecutionReceipt,
+  type SignFactoryExecutionReceiptOptions,
+  type FactoryExternalSignRequest,
+  type FactoryExternalSignature,
+  type FactoryExternalSigner,
+  type SignFactoryExecutionReceiptWithSignerOptions,
+  type FactoryVerificationKey,
+  type ResolveFactoryVerificationKeyInput,
+  type FactoryVerificationKeyResolver,
+  type VerifyFactoryExecutionReceiptOptions,
+  type VerifyFactoryExecutionReceiptResult,
+} from "./execution-evidence.js";
 
 // CommandLayer canonical proof envelope APIs
 export {
