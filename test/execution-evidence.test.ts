@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { sign as nodeSign } from "node:crypto";
 
 import {
   FACTORY_EXECUTION_RECEIPT_PROFILE,
+  canonicalize,
   generateEd25519KeyPair,
   signFactoryExecutionReceipt,
+  signFactoryExecutionReceiptWithSigner,
   verifyFactoryExecutionReceipt,
   type FactoryExecutionReceipt,
 } from "../src/index.js";
@@ -75,6 +78,79 @@ test("factory execution receipt signs and verifies with direct Ed25519 key", asy
   });
   assert.equal(verified.valid, true, verified.reason);
   assert.equal(verified.checks.signatureValid, true);
+});
+
+test("factory execution receipt can be signed by a non-exportable external Ed25519 signer", async () => {
+  const keys = generateEd25519KeyPair();
+  const unsigned = receipt();
+  let calls = 0;
+
+  const signed = await signFactoryExecutionReceiptWithSigner(unsigned, {
+    kid: "kms-ed25519-1",
+    signerId: "runtime.commandlayer.eth",
+    sign: async ({ alg, canonical, profile, kid, signerId, message }) => {
+      calls += 1;
+      assert.equal(alg, "Ed25519");
+      assert.equal(canonical, "json.sorted_keys.v1");
+      assert.equal(profile, FACTORY_EXECUTION_RECEIPT_PROFILE);
+      assert.equal(kid, "kms-ed25519-1");
+      assert.equal(signerId, "runtime.commandlayer.eth");
+      assert.equal(Buffer.from(message).toString("utf8"), canonicalize(unsigned));
+      return new Uint8Array(nodeSign(null, Buffer.from(message), keys.privateKeyPem));
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(signed.proof.kid, "kms-ed25519-1");
+  assert.equal(signed.proof.signer_id, "runtime.commandlayer.eth");
+  assert.equal(Buffer.from(signed.proof.signature, "base64").length, 64);
+
+  const verified = await verifyFactoryExecutionReceipt(signed, {
+    publicKeyPem: keys.publicKeyPem,
+    expectedKid: "kms-ed25519-1",
+    expectedSigner: "runtime.commandlayer.eth",
+  });
+  assert.equal(verified.valid, true, verified.reason);
+});
+
+test("external receipt signer may return standard-base64 Ed25519 signature", async () => {
+  const keys = generateEd25519KeyPair();
+  const signed = await signFactoryExecutionReceiptWithSigner(receipt(), {
+    kid: "kms-b64",
+    signerId: "runtime.commandlayer.eth",
+    sign: ({ message }) => nodeSign(null, Buffer.from(message), keys.privateKeyPem).toString("base64"),
+  });
+  const verified = await verifyFactoryExecutionReceipt(signed, { publicKeyPem: keys.publicKeyPem });
+  assert.equal(verified.valid, true, verified.reason);
+});
+
+test("external receipt signer rejects malformed signature length", async () => {
+  await assert.rejects(
+    () => signFactoryExecutionReceiptWithSigner(receipt(), {
+      kid: "bad-sig",
+      signerId: "runtime.commandlayer.eth",
+      sign: async () => new Uint8Array(63),
+    }),
+    /must be 64 bytes/,
+  );
+});
+
+test("external signer is never called for invalid payment-contaminated receipt", async () => {
+  const invalid = receipt() as FactoryExecutionReceipt & { payment_id?: string };
+  invalid.payment_id = "pay_forbidden";
+  let calls = 0;
+  await assert.rejects(
+    () => signFactoryExecutionReceiptWithSigner(invalid, {
+      kid: "kms-not-called",
+      signerId: "runtime.commandlayer.eth",
+      sign: async () => {
+        calls += 1;
+        return new Uint8Array(64);
+      },
+    }),
+    /must not contain payment proof fields/,
+  );
+  assert.equal(calls, 0);
 });
 
 test("factory execution receipt supports asynchronous production key resolution", async () => {
